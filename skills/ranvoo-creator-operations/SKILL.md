@@ -26,7 +26,8 @@ Read:
 7. Draft only for creators selected by the user unless asked for all.
 8. Show an execution preview and wait for explicit confirmation.
 9. If an approved action changes `合作进度` (or the equivalent current-stage field), include `更新日期` in the same preview and set it to the current date in Asia/Shanghai. Do not change `更新日期` for read-only review or unchanged progress.
-10. Re-check the thread and record, execute only approved changes, then verify.
+10. When a record reaches an approved transfer trigger, prepare a deduplicated target-table upsert preview using `references/routing-and-data.md`. Never create a target record before explicit confirmation.
+11. Re-check the thread and records, execute only approved source and target changes, then verify.
 
 ## Confirmation gate
 
@@ -37,6 +38,7 @@ Before sending or writing, show:
 - final subject and body;
 - each table field with old and new values;
 - the `更新日期` old/new value whenever collaboration progress will change;
+- source record, trigger evidence, target table, duplicate-match result, and copied target fields for any proposed transfer;
 - uncertainty or unmatched information.
 
 Never send, edit, create, or terminate from ambiguous approval. Material changes require a new preview.

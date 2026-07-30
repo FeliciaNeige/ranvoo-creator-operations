@@ -29,3 +29,17 @@ If multiple records match, do not update until the user chooses.
 Discover the live schema before editing. Typical fields include stage, 更新日期, last inbound/outbound date, follow-up count, next action, due date, platform, deliverables, price, contract, logistics, Brief, content, posting, payment, and concise factual notes.
 
 Whenever stage/current progress changes, set `更新日期` to the current date in Asia/Shanghai. Do not refresh it for read-only review or an unchanged progress value.
+
+## Stage-triggered target-table transfer
+
+- `UGC👖` → `UGC合作` after the UGC collaboration is explicitly agreed.
+- `牙刷红人👖` → `🪥合作红人（26年4月后` after the commercial creator collaboration is explicitly agreed.
+- `专业人员👖` → `🪥牙医合作` after the professional explicitly agrees to the product trial/evaluation.
+
+Interest or an unanswered proposal is not enough. Before creating, search the target by exact contact/email and then exact Handle/profile link. One match means update that record; multiple matches require user selection; no match means propose one new record.
+
+Copy only fields that exist in the target: Handle/channel name, profile link, contact/email, platform, creator/professional type, country, agreed content, collaboration date, collaboration progress, Brief status, concise notes, and 更新日期 when available. Never remove the source record.
+
+Show the source record, trigger evidence, target record or new-record status, duplicate-check result, and all copied fields before confirmation.
+
+`已合作牙医资料` is a separate post-collaboration professional archive and is not written by the product-trial trigger.

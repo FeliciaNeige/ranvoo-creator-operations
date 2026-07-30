@@ -22,6 +22,13 @@ type Creator = {
   lastOutbound: string;
   draft: string;
   updates: { field: string; from: string; to: string }[];
+  transfer?: {
+    source: string;
+    target: string;
+    trigger: string;
+    match: string;
+    fields: { field: string; value: string }[];
+  };
 };
 
 const todayLabel = new Intl.DateTimeFormat("en-US", {
@@ -76,6 +83,18 @@ const seedCreators: Creator[] = [
       { field: "反馈跟进", from: "2", to: "3" },
       { field: "备注", from: "等待地址", to: "已发送地址跟进 #3" },
     ],
+    transfer: {
+      source: "专业人员👖",
+      target: "🪥牙医合作",
+      trigger: "已明确同意体验 AirJet X5 产品",
+      match: "按邮箱和 Handle 查重：未发现目标记录，将新建",
+      fields: [
+        { field: "Handle", value: "@dr.elenasmiles" },
+        { field: "联系方式", value: "elena@example.com" },
+        { field: "合作进度", value: "地址待确认" },
+        { field: "更新日期", value: todayLabel },
+      ],
+    },
   },
   {
     id: 3,
@@ -236,7 +255,9 @@ export default function Home() {
 
   function requestExecution() {
     if (!connected) {
-      setNotice("当前为演示模式：已生成执行预览，但不会发送邮件或修改真实表格。请先配置飞书授权。");
+      setNotice(selected.transfer
+        ? `当前为演示模式：已生成邮件、源表更新和“${selected.transfer.target}”建档预览，但不会执行真实操作。`
+        : "当前为演示模式：已生成执行预览，但不会发送邮件或修改真实表格。请先配置飞书授权。");
       return;
     }
     if (!approved) {
@@ -371,6 +392,19 @@ export default function Home() {
             <article><span className="settingIcon">30</span><div><h2>终止候选</h2><p>超过30天无回复只标记为候选，不会自动终止或发送收尾邮件。</p></div><strong>需人工确认</strong></article>
             <article><span className="settingIcon">✓</span><div><h2>执行确认门槛</h2><p>发送前展示最终邮件、匹配记录和每个字段的新旧值。</p></div><strong>强制开启</strong></article>
             <article><span className="settingIcon">日</span><div><h2>更新日期联动</h2><p>合作进度发生变化时，将“更新日期”同步设为当天；仅查看或进度未变时不更新。</p></div><strong>已启用</strong></article>
+            <article className="transferSetting">
+              <span className="settingIcon">→</span>
+              <div>
+                <h2>阶段触发建档</h2>
+                <p>达到确定合作或产品试验后，查重并预览目标表记录；确认前不新增。</p>
+                <div className="ruleLines">
+                  <span><b>UGC👖</b> → UGC合作</span>
+                  <span><b>牙刷红人👖</b> → 🪥合作红人（26年4月后</span>
+                  <span><b>专业人员👖</b> → 🪥牙医合作</span>
+                </div>
+              </div>
+              <strong>需人工确认</strong>
+            </article>
             <article><span className="settingIcon">飞</span><div><h2>飞书连接</h2><p>当前未配置企业自建应用，真实邮箱与多维表格保持只读/不可用。</p></div><button onClick={() => setModal("connect")}>查看接入要求</button></article>
           </section>
         )}
@@ -443,6 +477,15 @@ function Workspace({
           {editing ? <textarea value={drafts[selected.id]} onChange={(event) => onDraft(event.target.value)} autoFocus /> : <pre>{drafts[selected.id]}</pre>}
         </div>
         <div className="updates"><label>飞书表格更新预览</label>{selected.updates.map((update) => <div className="updateRow" key={update.field}><span>{update.field}</span><del>{update.from}</del><b>→</b><ins>{update.to}</ins></div>)}</div>
+        {selected.transfer && (
+          <div className="transferPreview">
+            <div className="transferTitle"><label>目标表建档预览</label><span>待确认</span></div>
+            <div className="transferPath"><b>{selected.transfer.source}</b><i>→</i><b>{selected.transfer.target}</b></div>
+            <p><strong>触发依据</strong>{selected.transfer.trigger}</p>
+            <p><strong>查重结果</strong>{selected.transfer.match}</p>
+            <div className="copyFields">{selected.transfer.fields.map((item) => <span key={item.field}><b>{item.field}</b>{item.value}</span>)}</div>
+          </div>
+        )}
         <label className="confirm"><input type="checkbox" checked={approved} onChange={(event) => onApprove(event.target.checked)} /><span>我已核对邮件正文及以上所有字段变更</span></label>
         <button className="execute" onClick={onExecute}>确认发送并同步表格</button>
         <p className="safetyNote">演示模式不会执行真实外部操作</p>
