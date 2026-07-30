@@ -1,0 +1,5 @@
+interface:
+  display_name: "RANVOO Creator Operations"
+  short_description: "Operate Feishu creator outreach and follow-up workflows"
+  default_prompt: "Use $ranvoo-creator-operations to review today’s creator emails, propose replies and table updates, then wait for my confirmation."
+

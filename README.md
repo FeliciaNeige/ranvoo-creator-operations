@@ -1,98 +1,67 @@
-# vinext-starter
+# RANVOO Creator Operations
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+RANVOO 的达人建联工作台与 Codex Skill。项目将飞书邮箱、达人合作表和三套话术库整理成一个有确认门槛的日常工作流：
 
-## Prerequisites
+`读取邮件 → 识别合作类型 → 匹配达人记录 → 判断阶段 → 生成回复与表格变更预览 → 人工确认 → 执行`
 
-- Node.js `>=22.13.0`
+## 主要能力
 
-## Quick Start
+- 根据邮件标题与上下文路由至 UGC、牙医或商业化红人合作
+- 识别 3 天未回复的跟进对象和 30 天未回复的终止候选
+- 展示推荐回复、依据、合作阶段和飞书字段变更
+- 发送邮件或更新表格前强制人工确认
+- 提供可独立安装的 Codex Skill
+- 提供可部署的网页工作台
+
+## 项目结构
+
+```text
+app/                              网页工作台
+skills/ranvoo-creator-operations/ 可安装的 Codex Skill
+docs/                             工作流说明
+templates/                        示例数据模板
+tests/                            基础验证
+```
+
+## 本地运行
+
+需要 Node.js 22.13 或更高版本。
 
 ```bash
 npm install
 npm run dev
+```
+
+构建与测试：
+
+```bash
 npm run build
+npm test
 ```
 
-This starter does not use `wrangler.jsonc`.
+## 安装 Skill
 
-## Included Shape
+将 `skills/ranvoo-creator-operations` 文件夹复制到 Codex 的 skills 目录，重新启动 Codex 后即可调用：
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```text
+使用 ranvoo-creator-operations 检查今天需要跟进的达人，先生成预览，不要发送。
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+## 飞书接入
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+网页默认以演示模式运行，不会读写真实飞书数据。真实接入需要飞书企业自建应用，并通过环境变量安全配置凭证。不要把 `App Secret` 提交到 Git。
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+```bash
+cp .env.example .env.local
+```
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+填入本地环境变量后，再实现或启用飞书 OAuth/API 适配层。无论使用 API 还是浏览器模式，发送邮件、更新表格和终止合作都必须先由操作人明确确认。
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## 安全原则
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+- 不在日志、代码或表格备注中保存凭证和完整私人邮件
+- 不根据邮件标题单独判断合作状态
+- 不自动终止合作
+- 不在未确认时发送邮件或修改表格
+- 邮件与表格冲突时先提示，不静默覆盖
 
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
