@@ -26,5 +26,6 @@ Normalize whitespace, case, reply prefixes, and minor punctuation. If the title 
 
 If multiple records match, do not update until the user chooses.
 
-Discover the live schema before editing. Typical fields include stage, last inbound/outbound date, follow-up count, next action, due date, platform, deliverables, price, contract, logistics, Brief, content, posting, payment, and concise factual notes.
+Discover the live schema before editing. Typical fields include stage, 更新日期, last inbound/outbound date, follow-up count, next action, due date, platform, deliverables, price, contract, logistics, Brief, content, posting, payment, and concise factual notes.
 
+Whenever stage/current progress changes, set `更新日期` to the current date in Asia/Shanghai. Do not refresh it for read-only review or an unchanged progress value.

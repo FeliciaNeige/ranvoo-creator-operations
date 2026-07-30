@@ -25,7 +25,8 @@ Read:
 6. Return a queue ordered: Blocking, Due Today, Follow-up Due, Monitor, Termination Candidate.
 7. Draft only for creators selected by the user unless asked for all.
 8. Show an execution preview and wait for explicit confirmation.
-9. Re-check the thread and record, execute only approved changes, then verify.
+9. If an approved action changes `合作进度` (or the equivalent current-stage field), include `更新日期` in the same preview and set it to the current date in Asia/Shanghai. Do not change `更新日期` for read-only review or unchanged progress.
+10. Re-check the thread and record, execute only approved changes, then verify.
 
 ## Confirmation gate
 
@@ -35,7 +36,7 @@ Before sending or writing, show:
 - category and matched record;
 - final subject and body;
 - each table field with old and new values;
+- the `更新日期` old/new value whenever collaboration progress will change;
 - uncertainty or unmatched information.
 
 Never send, edit, create, or terminate from ambiguous approval. Material changes require a new preview.
-

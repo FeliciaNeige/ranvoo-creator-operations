@@ -24,6 +24,12 @@ type Creator = {
   updates: { field: string; from: string; to: string }[];
 };
 
+const todayLabel = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "Asia/Shanghai",
+}).format(new Date());
+
 const seedCreators: Creator[] = [
   {
     id: 1,
@@ -43,6 +49,7 @@ const seedCreators: Creator[] = [
       "Hi Maya,\n\nJust checking in on the AirJet X5 UGC collaboration. To make the next step easy, would you prefer to review the creative concepts first, or confirm the collaboration details by email?\n\nIf the timing isn’t right, feel free to let me know as well.\n\nBest,\nFelicia",
     updates: [
       { field: "合作进度", from: "已触达", to: "Follow-up #1" },
+      { field: "更新日期", from: "Jul 26", to: todayLabel },
       { field: "最后跟进日期", from: "Jul 26", to: "Jul 30" },
       { field: "下次检查", from: "—", to: "Aug 2" },
     ],
@@ -65,6 +72,7 @@ const seedCreators: Creator[] = [
       "Hi Dr. Morris,\n\nA quick follow-up on the AirJet X5 evaluation unit. We’ve recently received encouraging feedback from dental professionals on comfort and hard-to-reach cleaning, and we’d still value your perspective.\n\nIf you’d like to move forward, could you share the best shipping address and phone number for delivery?\n\nBest,\nFelicia",
     updates: [
       { field: "合作进度", from: "样品体验", to: "地址待确认" },
+      { field: "更新日期", from: "Jul 23", to: todayLabel },
       { field: "反馈跟进", from: "2", to: "3" },
       { field: "备注", from: "等待地址", to: "已发送地址跟进 #3" },
     ],
@@ -104,6 +112,7 @@ const seedCreators: Creator[] = [
       "Hi Nora,\n\nI wanted to close the loop on our RANVOO collaboration invitation. We understand timing and priorities can change, so we’ll pause this opportunity for now.\n\nWe’d be happy to reconnect in the future if there’s a better fit.\n\nBest,\nFelicia",
     updates: [
       { field: "合作进度", from: "Follow-up #3", to: "终止候选" },
+      { field: "更新日期", from: "Jun 27", to: todayLabel },
       { field: "备注", from: "等待回复", to: "33天无回复，待人工决定" },
     ],
   },
@@ -210,7 +219,10 @@ export default function Home() {
       lastInbound: "—",
       lastOutbound: "—",
       draft: "请先完成线程与记录匹配，再生成邮件草稿。",
-      updates: [{ field: "合作进度", from: "—", to: "新建 / 待分类" }],
+      updates: [
+        { field: "合作进度", from: "—", to: "新建 / 待分类" },
+        { field: "更新日期", from: "—", to: todayLabel },
+      ],
     };
     setCreators((items) => [creator, ...items]);
     setDrafts((items) => ({ ...items, [id]: creator.draft }));
@@ -358,6 +370,7 @@ export default function Home() {
             <article><span className="settingIcon">3</span><div><h2>跟进提醒</h2><p>最后一封发出邮件满3个完整自然日且无回复时进入“需要跟进”。</p></div><strong>已启用</strong></article>
             <article><span className="settingIcon">30</span><div><h2>终止候选</h2><p>超过30天无回复只标记为候选，不会自动终止或发送收尾邮件。</p></div><strong>需人工确认</strong></article>
             <article><span className="settingIcon">✓</span><div><h2>执行确认门槛</h2><p>发送前展示最终邮件、匹配记录和每个字段的新旧值。</p></div><strong>强制开启</strong></article>
+            <article><span className="settingIcon">日</span><div><h2>更新日期联动</h2><p>合作进度发生变化时，将“更新日期”同步设为当天；仅查看或进度未变时不更新。</p></div><strong>已启用</strong></article>
             <article><span className="settingIcon">飞</span><div><h2>飞书连接</h2><p>当前未配置企业自建应用，真实邮箱与多维表格保持只读/不可用。</p></div><button onClick={() => setModal("connect")}>查看接入要求</button></article>
           </section>
         )}

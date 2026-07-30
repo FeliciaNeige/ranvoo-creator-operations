@@ -25,3 +25,8 @@ Never advance a stage from an offer alone.
 
 When email and table conflict, flag the conflict and recommend the smallest correction.
 
+## 更新日期
+
+- When an approved action changes `合作进度` or its equivalent current-stage field, set `更新日期` to today's date in Asia/Shanghai in the same table update.
+- Do not change `更新日期` during read-only review or when the progress/current-stage value is unchanged.
+- Show the old and new date in the confirmation preview, then verify both the progress value and `更新日期` after writing.
