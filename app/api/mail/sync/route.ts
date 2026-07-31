@@ -59,18 +59,12 @@ export async function POST(request: Request): Promise<Response> {
     setCookie = folderResult.setCookie;
     const folders = (folderResult.data?.items ?? []).filter(
       (folder): folder is Folder =>
-        Boolean(
-          folder &&
-            typeof folder.id === "string" &&
-            folder.id &&
-            /^(inbox|收件箱)$/i.test(`${folder.id}`) ||
-            /^(inbox|收件箱)$/i.test(`${folder?.name ?? ""}`),
-        ),
+        Boolean(folder && typeof folder.id === "string" && folder.id),
     );
     if (!folders.length) {
       throw new MailApiError(
         502,
-        "飞书没有返回收件箱，请确认“查询邮箱文件夹”权限已发布并重新授权。",
+        "飞书没有返回任何邮箱文件夹，请确认“查询邮箱文件夹”权限已发布并重新授权。",
       );
     }
 
@@ -180,13 +174,7 @@ export async function POST(request: Request): Promise<Response> {
       ? listed.data?.page_token ?? null
       : null;
     const total = await db
-      .prepare(`
-        SELECT COUNT(*) AS count
-        FROM email_messages
-        WHERE UPPER(COALESCE(folder_id, '')) = 'INBOX'
-           OR LOWER(COALESCE(folder_name, '')) = 'inbox'
-           OR folder_name = '收件箱'
-      `)
+      .prepare("SELECT COUNT(*) AS count FROM email_messages")
       .first<{ count: number }>();
     const foldersCompleted = folderHasMore ? folderIndex : folderIndex + 1;
 
