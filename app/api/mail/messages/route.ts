@@ -26,10 +26,17 @@ export async function GET(request: Request): Promise<Response> {
               message_id, thread_id, folder_id, folder_name, subject, sender_name, sender_email,
               recipients_json, sent_at, snippet, body_text, direction
             FROM email_messages
-            WHERE subject LIKE ? ESCAPE '\\'
-               OR sender_name LIKE ? ESCAPE '\\'
-               OR sender_email LIKE ? ESCAPE '\\'
-               OR body_text LIKE ? ESCAPE '\\'
+            WHERE (
+              UPPER(COALESCE(folder_id, '')) = 'INBOX'
+              OR LOWER(COALESCE(folder_name, '')) = 'inbox'
+              OR folder_name = '收件箱'
+            )
+              AND (
+                subject LIKE ? ESCAPE '\\'
+                OR sender_name LIKE ? ESCAPE '\\'
+                OR sender_email LIKE ? ESCAPE '\\'
+                OR body_text LIKE ? ESCAPE '\\'
+              )
             ORDER BY COALESCE(sent_at, imported_at) DESC
             LIMIT ? OFFSET ?
           `)
@@ -40,6 +47,9 @@ export async function GET(request: Request): Promise<Response> {
               message_id, thread_id, folder_id, folder_name, subject, sender_name, sender_email,
               recipients_json, sent_at, snippet, body_text, direction
             FROM email_messages
+            WHERE UPPER(COALESCE(folder_id, '')) = 'INBOX'
+               OR LOWER(COALESCE(folder_name, '')) = 'inbox'
+               OR folder_name = '收件箱'
             ORDER BY COALESCE(sent_at, imported_at) DESC
             LIMIT ? OFFSET ?
           `)
@@ -49,13 +59,26 @@ export async function GET(request: Request): Promise<Response> {
           .prepare(`
             SELECT COUNT(*) AS count
             FROM email_messages
-            WHERE subject LIKE ? ESCAPE '\\'
-               OR sender_name LIKE ? ESCAPE '\\'
-               OR sender_email LIKE ? ESCAPE '\\'
-               OR body_text LIKE ? ESCAPE '\\'
+            WHERE (
+              UPPER(COALESCE(folder_id, '')) = 'INBOX'
+              OR LOWER(COALESCE(folder_name, '')) = 'inbox'
+              OR folder_name = '收件箱'
+            )
+              AND (
+                subject LIKE ? ESCAPE '\\'
+                OR sender_name LIKE ? ESCAPE '\\'
+                OR sender_email LIKE ? ESCAPE '\\'
+                OR body_text LIKE ? ESCAPE '\\'
+              )
           `)
           .bind(pattern, pattern, pattern, pattern)
-      : db.prepare("SELECT COUNT(*) AS count FROM email_messages");
+      : db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM email_messages
+          WHERE UPPER(COALESCE(folder_id, '')) = 'INBOX'
+             OR LOWER(COALESCE(folder_name, '')) = 'inbox'
+             OR folder_name = '收件箱'
+        `);
     const [messages, state, total] = await Promise.all([
       query.all(),
       db
@@ -77,12 +100,14 @@ export async function GET(request: Request): Promise<Response> {
               : null,
         })),
         total: total?.count ?? 0,
-        sync: state ?? {
-          total_imported: 0,
-          last_synced_at: null,
-          status: "idle",
-          last_error: null,
-          page_token: null,
+        sync: {
+          ...(state ?? {
+            last_synced_at: null,
+            status: "idle",
+            last_error: null,
+            page_token: null,
+          }),
+          total_imported: total?.count ?? 0,
         },
       },
       { headers: { "Cache-Control": "no-store" } },

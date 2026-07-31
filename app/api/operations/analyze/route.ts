@@ -31,6 +31,9 @@ export async function POST(request: Request): Promise<Response> {
           message_id, thread_id, subject, sender_name, sender_email,
           recipients_json, sent_at, snippet, body_text, direction
         FROM email_messages
+        WHERE UPPER(COALESCE(folder_id, '')) = 'INBOX'
+           OR LOWER(COALESCE(folder_name, '')) = 'inbox'
+           OR folder_name = '收件箱'
         ORDER BY COALESCE(sent_at, imported_at) ASC
         LIMIT 20000
       `)

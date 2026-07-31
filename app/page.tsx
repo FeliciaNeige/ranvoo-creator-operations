@@ -737,7 +737,7 @@ export default function Home() {
                           ? `上次同步 ${formatMailDate(mailSync.last_synced_at)}`
                           : "等待下次同步"
                       }`
-                    : "首次同步会分批迁移历史邮件，之后只检查新增内容。"}
+                    : "首次同步会分批迁移收件箱历史邮件，之后只检查收件箱新增内容。"}
                 </p>
                 {(syncProgress || mailError) && (
                   <small className={mailError ? "syncError" : ""}>
@@ -752,7 +752,7 @@ export default function Home() {
                       className="secondaryAction"
                       onClick={() => void syncAllMail(true)}
                     >
-                      完整重扫
+                      完整重扫收件箱
                     </button>
                   )}
                   <button
@@ -762,10 +762,10 @@ export default function Home() {
                     {syncingMail
                       ? "正在同步…"
                       : mailSync.status === "running"
-                        ? "继续同步"
+                        ? "继续同步收件箱"
                         : mailSync.total_imported
-                          ? "同步新邮件"
-                          : "迁移全部邮件"}
+                          ? "同步收件箱新邮件"
+                          : "迁移收件箱"}
                   </button>
                 </div>
               ) : (
