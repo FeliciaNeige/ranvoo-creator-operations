@@ -20,21 +20,40 @@ export async function authorizedMailRequest<T>(
   const auth = await ensureFeishuSession(request);
   if (!auth) throw new MailApiError(401, "飞书授权已过期，请重新连接。");
 
-  const response = await fetch(`${FEISHU_API_BASE}${path}`, {
-    headers: {
-      Authorization: `Bearer ${auth.session.accessToken}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-  });
-  const body = (await response.json()) as FeishuEnvelope<T>;
-  if (!response.ok || (typeof body.code === "number" && body.code !== 0)) {
-    const message =
-      body.code === 1230002
-        ? "缺少飞书邮箱读取权限，请发布新版应用后重新授权。"
-        : body.msg || "飞书邮箱暂时无法读取。";
-    throw new MailApiError(response.status || 502, message, body.code);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await fetch(`${FEISHU_API_BASE}${path}`, {
+      headers: {
+        Authorization: `Bearer ${auth.session.accessToken}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+    });
+    const body = (await response.json()) as FeishuEnvelope<T>;
+    const rateLimited =
+      response.status === 429 ||
+      /frequency limit|rate limit|too many requests/i.test(body.msg ?? "");
+    if (rateLimited && attempt < 4) {
+      const retryAfter = Number(response.headers.get("Retry-After") ?? 0);
+      await delay(
+        retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(4000, 400 * 2 ** attempt),
+      );
+      continue;
+    }
+    if (!response.ok || (typeof body.code === "number" && body.code !== 0)) {
+      const message =
+        body.code === 1230002
+          ? "缺少飞书邮箱读取权限，请发布新版应用后重新授权。"
+          : body.msg || "飞书邮箱暂时无法读取。";
+      throw new MailApiError(response.status || 502, message, body.code);
+    }
+    return { data: body.data as T, setCookie: auth.setCookie };
   }
-  return { data: body.data as T, setCookie: auth.setCookie };
+  throw new MailApiError(429, "飞书请求频率过高，请稍后继续同步。");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function getMailDb(): D1Database {

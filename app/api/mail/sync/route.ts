@@ -102,13 +102,15 @@ export async function POST(request: Request): Promise<Response> {
 
     const messages = pageAlreadyKnown
       ? []
-      : await mapWithConcurrency(ids, 5, async (id) => {
+      : await mapWithConcurrency(ids, 1, async (id) => {
           const detail = await authorizedMailRequest<MessageData>(
             request,
             `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}`,
           );
           setCookie ??= detail.setCookie;
-          return normalizeMessage(id, detail.data, folder);
+          const normalized = normalizeMessage(id, detail.data, folder);
+          await delay(160);
+          return normalized;
         });
 
     const now = Date.now();
@@ -370,4 +372,8 @@ async function mapWithConcurrency<T, R>(
     Array.from({ length: Math.min(concurrency, items.length) }, worker),
   );
   return results;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
