@@ -105,7 +105,7 @@ export async function POST(request: Request): Promise<Response> {
       : await mapWithConcurrency(ids, 1, async (id) => {
           const detail = await authorizedMailRequest<MessageData>(
             request,
-            `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}`,
+            `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}?format=plain_text_full`,
           );
           setCookie ??= detail.setCookie;
           const normalized = normalizeMessage(id, detail.data, folder);
@@ -253,7 +253,7 @@ export async function POST(request: Request): Promise<Response> {
 
 function normalizeMessage(id: string, value: MessageData, folder: Folder) {
   const raw = (value?.message ?? value ?? {}) as Record<string, unknown>;
-  const sender = firstAddress(raw.from ?? raw.sender);
+  const sender = firstAddress(raw.head_from ?? raw.from ?? raw.sender);
   const recipients = [
     ...allAddresses(raw.to),
     ...allAddresses(raw.cc),
@@ -268,12 +268,12 @@ function normalizeMessage(id: string, value: MessageData, folder: Folder) {
   );
   const folderIds = stringArray(raw.folder_ids ?? raw.folders);
   const labels = stringArray(raw.label_ids ?? raw.labels);
-  const bodyText = stringValue(
-    raw.body ?? raw.body_text ?? raw.text_body ?? raw.snippet,
-  );
-  const bodyHtml = stringValue(
-    raw.mail_body_html ?? raw.body_html ?? raw.html_body,
-  );
+  const bodyText =
+    decodeBase64Url(stringValue(raw.body_plain_text)) ??
+    stringValue(raw.body ?? raw.body_text ?? raw.text_body ?? raw.snippet);
+  const bodyHtml =
+    decodeBase64Url(stringValue(raw.body_html)) ??
+    stringValue(raw.mail_body_html ?? raw.html_body);
   const folderName = folder.name ?? folder.id;
   const direction = /sent|outbox|已发送|发件箱/i.test(
     `${folder.id} ${folderName}`,
@@ -305,6 +305,21 @@ function normalizeMessage(id: string, value: MessageData, folder: Folder) {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function decodeBase64Url(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (character) =>
+      character.charCodeAt(0),
+    );
+    const decoded = new TextDecoder().decode(bytes);
+    return decoded.trim() ? decoded : null;
+  } catch {
+    return value;
+  }
 }
 
 function stringArray(value: unknown): string[] {
