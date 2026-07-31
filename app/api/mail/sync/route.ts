@@ -102,7 +102,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const messages = pageAlreadyKnown
       ? []
-      : await mapWithConcurrency(ids, 3, async (id) => {
+      : await mapWithConcurrency(ids, 5, async (id) => {
           const detail = await authorizedMailRequest<MessageData>(
             request,
             `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}?format=plain_text_full`,
@@ -377,14 +377,18 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let cursor = 0;
-  async function worker() {
+  async function worker(workerIndex: number) {
+    if (workerIndex > 0) await delay(workerIndex * 220);
     while (cursor < items.length) {
       const index = cursor++;
       results[index] = await mapper(items[index]);
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, worker),
+    Array.from(
+      { length: Math.min(concurrency, items.length) },
+      (_, workerIndex) => worker(workerIndex),
+    ),
   );
   return results;
 }
