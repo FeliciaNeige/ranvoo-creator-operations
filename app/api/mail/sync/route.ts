@@ -8,7 +8,17 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type ListData = {
+type Folder = {
+  id: string;
+  name?: string;
+  folder_type?: number;
+};
+
+type FolderListData = {
+  items?: Folder[];
+};
+
+type MessageListData = {
   items?: string[];
   page_token?: string;
   has_more?: boolean;
@@ -23,6 +33,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const body = (await request.json().catch(() => ({}))) as {
       pageToken?: string;
+      folderIndex?: number;
       resume?: boolean;
       full?: boolean;
     };
@@ -30,22 +41,49 @@ export async function POST(request: Request): Promise<Response> {
     await ensureMailTables(db);
 
     let pageToken = body.pageToken ?? "";
-    if (!pageToken && body.resume) {
+    let folderIndex = Math.max(0, body.folderIndex ?? 0);
+    if (body.resume && !pageToken && body.folderIndex === undefined) {
       const state = await db
         .prepare(
-          "SELECT page_token FROM mail_sync_state WHERE mailbox_id = 'me'",
+          "SELECT page_token, folder_index FROM mail_sync_state WHERE mailbox_id = 'me'",
         )
-        .first<{ page_token?: string }>();
+        .first<{ page_token?: string; folder_index?: number }>();
       pageToken = state?.page_token ?? "";
+      folderIndex = Math.max(0, state?.folder_index ?? 0);
     }
 
-    const query = new URLSearchParams({ page_size: "20" });
+    const folderResult = await authorizedMailRequest<FolderListData>(
+      request,
+      "/mail/v1/user_mailboxes/me/folders",
+    );
+    setCookie = folderResult.setCookie;
+    const folders = (folderResult.data?.items ?? []).filter(
+      (folder): folder is Folder =>
+        Boolean(folder && typeof folder.id === "string" && folder.id),
+    );
+    if (!folders.length) {
+      throw new MailApiError(
+        502,
+        "飞书没有返回任何邮箱文件夹，请确认“查询邮箱文件夹”权限已发布并重新授权。",
+      );
+    }
+
+    if (folderIndex >= folders.length) {
+      folderIndex = 0;
+      pageToken = "";
+    }
+    const folder = folders[folderIndex];
+    const query = new URLSearchParams({
+      page_size: "20",
+      folder_id: folder.id,
+    });
     if (pageToken) query.set("page_token", pageToken);
-    const listed = await authorizedMailRequest<ListData>(
+
+    const listed = await authorizedMailRequest<MessageListData>(
       request,
       `/mail/v1/user_mailboxes/me/messages?${query.toString()}`,
     );
-    setCookie = listed.setCookie;
+    setCookie ??= listed.setCookie;
     const ids = Array.isArray(listed.data?.items) ? listed.data.items : [];
 
     const existing = ids.length
@@ -59,10 +97,10 @@ export async function POST(request: Request): Promise<Response> {
           .all<{ message_id: string }>()
       : { results: [] as { message_id: string }[] };
     const known = new Set(existing.results.map((row) => row.message_id));
-    const incrementalComplete =
+    const pageAlreadyKnown =
       !body.full && ids.length > 0 && ids.every((id) => known.has(id));
 
-    const messages = incrementalComplete
+    const messages = pageAlreadyKnown
       ? []
       : await mapWithConcurrency(ids, 5, async (id) => {
           const detail = await authorizedMailRequest<MessageData>(
@@ -70,7 +108,7 @@ export async function POST(request: Request): Promise<Response> {
             `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}`,
           );
           setCookie ??= detail.setCookie;
-          return normalizeMessage(id, detail.data);
+          return normalizeMessage(id, detail.data, folder);
         });
 
     const now = Date.now();
@@ -80,13 +118,15 @@ export async function POST(request: Request): Promise<Response> {
           db
             .prepare(`
               INSERT INTO email_messages (
-                message_id, thread_id, folder_id, subject, sender_name,
-                sender_email, recipients_json, sent_at, snippet, body_text,
-                body_html, labels_json, direction, raw_json, imported_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                message_id, thread_id, folder_id, folder_name, subject,
+                sender_name, sender_email, recipients_json, sent_at, snippet,
+                body_text, body_html, labels_json, direction, raw_json,
+                imported_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(message_id) DO UPDATE SET
                 thread_id = excluded.thread_id,
                 folder_id = excluded.folder_id,
+                folder_name = excluded.folder_name,
                 subject = excluded.subject,
                 sender_name = excluded.sender_name,
                 sender_email = excluded.sender_email,
@@ -104,6 +144,7 @@ export async function POST(request: Request): Promise<Response> {
               message.messageId,
               message.threadId,
               message.folderId,
+              message.folderName,
               message.subject,
               message.senderName,
               message.senderEmail,
@@ -122,21 +163,33 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const hasMore =
-      !incrementalComplete &&
-      Boolean(listed.data?.has_more && listed.data?.page_token);
-    const nextPageToken = hasMore ? listed.data.page_token ?? null : null;
+    const folderHasMore = Boolean(
+      !pageAlreadyKnown && listed.data?.has_more && listed.data?.page_token,
+    );
+    const nextFolderIndex = folderHasMore ? folderIndex : folderIndex + 1;
+    const hasMore = nextFolderIndex < folders.length;
+    const nextPageToken = folderHasMore
+      ? listed.data?.page_token ?? null
+      : null;
     const total = await db
       .prepare("SELECT COUNT(*) AS count FROM email_messages")
       .first<{ count: number }>();
+    const foldersCompleted = folderHasMore ? folderIndex : folderIndex + 1;
 
     await db
       .prepare(`
         INSERT INTO mail_sync_state (
-          mailbox_id, page_token, total_imported, last_synced_at, status, last_error
-        ) VALUES ('me', ?, ?, ?, ?, NULL)
+          mailbox_id, page_token, folder_index, folder_id, folder_name,
+          folders_total, folders_completed, total_imported, last_synced_at,
+          status, last_error
+        ) VALUES ('me', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         ON CONFLICT(mailbox_id) DO UPDATE SET
           page_token = excluded.page_token,
+          folder_index = excluded.folder_index,
+          folder_id = excluded.folder_id,
+          folder_name = excluded.folder_name,
+          folders_total = excluded.folders_total,
+          folders_completed = excluded.folders_completed,
           total_imported = excluded.total_imported,
           last_synced_at = excluded.last_synced_at,
           status = excluded.status,
@@ -144,6 +197,11 @@ export async function POST(request: Request): Promise<Response> {
       `)
       .bind(
         nextPageToken,
+        hasMore ? nextFolderIndex : 0,
+        folder.id,
+        folder.name ?? folder.id,
+        folders.length,
+        foldersCompleted,
         total?.count ?? 0,
         now,
         hasMore ? "running" : "idle",
@@ -155,11 +213,16 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json(
       {
         imported: messages.length,
+        checked: ids.length,
         total: total?.count ?? 0,
         hasMore,
         pageToken: nextPageToken,
+        folderIndex: hasMore ? nextFolderIndex : 0,
+        folderName: folder.name ?? folder.id,
+        foldersTotal: folders.length,
+        foldersCompleted,
         complete: !hasMore,
-        incrementalComplete,
+        pageAlreadyKnown,
       },
       { headers },
     );
@@ -186,7 +249,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-function normalizeMessage(id: string, value: MessageData) {
+function normalizeMessage(id: string, value: MessageData, folder: Folder) {
   const raw = (value?.message ?? value ?? {}) as Record<string, unknown>;
   const sender = firstAddress(raw.from ?? raw.sender);
   const recipients = [
@@ -209,11 +272,18 @@ function normalizeMessage(id: string, value: MessageData) {
   const bodyHtml = stringValue(
     raw.mail_body_html ?? raw.body_html ?? raw.html_body,
   );
+  const folderName = folder.name ?? folder.id;
+  const direction = /sent|outbox|已发送|发件箱/i.test(
+    `${folder.id} ${folderName}`,
+  )
+    ? "outbound"
+    : "inbound";
 
   return {
     messageId: stringValue(raw.message_id) || id,
     threadId: stringValue(raw.thread_id) || null,
-    folderId: folderIds[0] ?? stringValue(raw.folder_id) ?? null,
+    folderId: folderIds[0] ?? stringValue(raw.folder_id) ?? folder.id,
+    folderName,
     subject: stringValue(raw.subject) || "（无主题）",
     senderName: sender?.name ?? null,
     senderEmail: sender?.email ?? null,
@@ -226,11 +296,7 @@ function normalizeMessage(id: string, value: MessageData) {
     bodyText,
     bodyHtml,
     labels,
-    direction: folderIds.some((folder) =>
-      /sent|outbox|已发送/i.test(folder),
-    )
-      ? "outbound"
-      : "inbound",
+    direction,
     rawJson: JSON.stringify(raw),
   };
 }

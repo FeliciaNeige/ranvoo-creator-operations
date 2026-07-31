@@ -72,6 +72,7 @@ export async function ensureMailTables(db: D1Database): Promise<void> {
         message_id TEXT PRIMARY KEY NOT NULL,
         thread_id TEXT,
         folder_id TEXT,
+        folder_name TEXT,
         subject TEXT NOT NULL DEFAULT '（无主题）',
         sender_name TEXT,
         sender_email TEXT,
@@ -91,6 +92,11 @@ export async function ensureMailTables(db: D1Database): Promise<void> {
       CREATE TABLE IF NOT EXISTS mail_sync_state (
         mailbox_id TEXT PRIMARY KEY NOT NULL,
         page_token TEXT,
+        folder_index INTEGER NOT NULL DEFAULT 0,
+        folder_id TEXT,
+        folder_name TEXT,
+        folders_total INTEGER NOT NULL DEFAULT 0,
+        folders_completed INTEGER NOT NULL DEFAULT 0,
         total_imported INTEGER NOT NULL DEFAULT 0,
         last_synced_at INTEGER,
         status TEXT NOT NULL DEFAULT 'idle',
@@ -104,4 +110,31 @@ export async function ensureMailTables(db: D1Database): Promise<void> {
       "CREATE INDEX IF NOT EXISTS email_messages_thread_id_idx ON email_messages(thread_id)",
     ),
   ]);
+
+  await ensureColumns(db, "email_messages", [
+    ["folder_name", "folder_name TEXT"],
+  ]);
+  await ensureColumns(db, "mail_sync_state", [
+    ["folder_index", "folder_index INTEGER NOT NULL DEFAULT 0"],
+    ["folder_id", "folder_id TEXT"],
+    ["folder_name", "folder_name TEXT"],
+    ["folders_total", "folders_total INTEGER NOT NULL DEFAULT 0"],
+    ["folders_completed", "folders_completed INTEGER NOT NULL DEFAULT 0"],
+  ]);
+}
+
+async function ensureColumns(
+  db: D1Database,
+  table: "email_messages" | "mail_sync_state",
+  columns: [string, string][],
+): Promise<void> {
+  const info = await db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all<{ name: string }>();
+  const existing = new Set(info.results.map((column) => column.name));
+  for (const [name, definition] of columns) {
+    if (!existing.has(name)) {
+      await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${definition}`).run();
+    }
+  }
 }

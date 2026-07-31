@@ -34,6 +34,8 @@ type Creator = {
 type ImportedEmail = {
   message_id: string;
   thread_id?: string | null;
+  folder_id?: string | null;
+  folder_name?: string | null;
   subject: string;
   sender_name?: string | null;
   sender_email?: string | null;
@@ -50,6 +52,11 @@ type MailSync = {
   status: "idle" | "running" | "error";
   last_error?: string | null;
   page_token?: string | null;
+  folder_index?: number;
+  folder_id?: string | null;
+  folder_name?: string | null;
+  folders_total?: number;
+  folders_completed?: number;
 };
 
 const todayLabel = new Intl.DateTimeFormat("en-US", {
@@ -225,6 +232,8 @@ export default function Home() {
   });
   const [selectedMailId, setSelectedMailId] = useState("");
   const [mailLoading, setMailLoading] = useState(false);
+  const [mailLoaded, setMailLoaded] = useState(false);
+  const [mailTotal, setMailTotal] = useState(0);
   const [syncingMail, setSyncingMail] = useState(false);
   const [syncProgress, setSyncProgress] = useState("");
   const [mailError, setMailError] = useState("");
@@ -252,7 +261,7 @@ export default function Home() {
   useEffect(() => {
     if (view !== "mail" || !connected) return;
     const timer = window.setTimeout(() => {
-      void loadImportedMail(search);
+      void loadImportedMail(search, false);
     }, 250);
     return () => window.clearTimeout(timer);
   }, [view, connected, search]);
@@ -343,12 +352,13 @@ export default function Home() {
     window.location.assign("/api/auth/feishu/start");
   }
 
-  async function loadImportedMail(query = "") {
+  async function loadImportedMail(query = "", append = false) {
     setMailLoading(true);
     setMailError("");
     try {
+      const offset = append ? importedEmails.length : 0;
       const response = await fetch(
-        `/api/mail/messages?limit=100&q=${encodeURIComponent(query)}`,
+        `/api/mail/messages?limit=100&offset=${offset}&q=${encodeURIComponent(query)}`,
         { cache: "no-store" },
       );
       const body = await response.json() as {
@@ -359,12 +369,25 @@ export default function Home() {
       };
       if (!response.ok) throw new Error(body.error || "邮件列表读取失败。");
       const items = body.items ?? [];
-      setImportedEmails(items);
+      const nextItems = append
+        ? [
+            ...importedEmails,
+            ...items.filter(
+              (item) =>
+                !importedEmails.some(
+                  (existing) => existing.message_id === item.message_id,
+                ),
+            ),
+          ]
+        : items;
+      setImportedEmails(nextItems);
+      setMailTotal(body.total ?? nextItems.length);
+      setMailLoaded(true);
       setMailSync(body.sync ?? { total_imported: body.total ?? 0, status: "idle" });
       setSelectedMailId((current) =>
-        current && items.some((item) => item.message_id === current)
+        current && nextItems.some((item) => item.message_id === current)
           ? current
-          : items[0]?.message_id ?? "",
+          : nextItems[0]?.message_id ?? "",
       );
     } catch (error) {
       setMailError(error instanceof Error ? error.message : "邮件列表读取失败。");
@@ -373,22 +396,29 @@ export default function Home() {
     }
   }
 
-  async function syncAllMail() {
+  async function syncAllMail(forceFull = false) {
     if (!connected || syncingMail) return;
     setSyncingMail(true);
     setMailError("");
     let pageToken = mailSync.status === "running"
       ? mailSync.page_token ?? ""
       : "";
+    let folderIndex = mailSync.status === "running"
+      ? mailSync.folder_index ?? 0
+      : 0;
     let processed = 0;
+    let checked = 0;
+    const full = forceFull || mailSync.total_imported === 0;
     try {
-      for (let batch = 0; batch < 500; batch += 1) {
+      for (let batch = 0; batch < 2000; batch += 1) {
         const response = await fetch("/api/mail/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             pageToken,
+            folderIndex,
             resume: batch === 0 && mailSync.status === "running",
+            full,
           }),
         });
         const result = await response.json() as {
@@ -396,21 +426,32 @@ export default function Home() {
           total?: number;
           hasMore?: boolean;
           pageToken?: string | null;
+          folderIndex?: number;
+          folderName?: string;
+          foldersTotal?: number;
+          foldersCompleted?: number;
+          checked?: number;
           error?: string;
         };
         if (!response.ok) throw new Error(result.error || "邮件同步失败。");
         processed += result.imported ?? 0;
+        checked += result.checked ?? 0;
         setSyncProgress(
-          `已检查 ${processed} 封，本网站现有 ${result.total ?? 0} 封邮件…`,
+          `正在迁移 ${result.folderName ?? "邮箱文件夹"}（${
+            result.foldersCompleted ?? 0
+          }/${result.foldersTotal ?? 0}）· 已检查 ${checked} 封 · 网站现有 ${
+            result.total ?? 0
+          } 封…`,
         );
-        if (!result.hasMore || !result.pageToken) break;
-        pageToken = result.pageToken;
+        if (!result.hasMore) break;
+        pageToken = result.pageToken ?? "";
+        folderIndex = result.folderIndex ?? folderIndex;
       }
-      await loadImportedMail(search);
+      await loadImportedMail(search, false);
       setSyncProgress(
         processed > 0
           ? `同步完成：本次新增或更新 ${processed} 封邮件。`
-          : "同步完成：没有发现新邮件。",
+          : `同步完成：已检查全部文件夹，没有发现新邮件。`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "邮件同步失败。";
@@ -529,15 +570,28 @@ export default function Home() {
                 )}
               </div>
               {connected ? (
-                <button onClick={syncAllMail} disabled={syncingMail}>
-                  {syncingMail
-                    ? "正在同步…"
-                    : mailSync.status === "running"
-                      ? "继续同步"
-                      : mailSync.total_imported
-                        ? "同步新邮件"
-                        : "迁移全部邮件"}
-                </button>
+                <div className="syncActions">
+                  {mailSync.total_imported > 0 && !syncingMail && (
+                    <button
+                      className="secondaryAction"
+                      onClick={() => void syncAllMail(true)}
+                    >
+                      完整重扫
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void syncAllMail(false)}
+                    disabled={syncingMail}
+                  >
+                    {syncingMail
+                      ? "正在同步…"
+                      : mailSync.status === "running"
+                        ? "继续同步"
+                        : mailSync.total_imported
+                          ? "同步新邮件"
+                          : "迁移全部邮件"}
+                  </button>
+                </div>
               ) : (
                 <button onClick={connectFeishu}>先连接飞书</button>
               )}
@@ -546,8 +600,14 @@ export default function Home() {
               <div className="panel">
                 <div className="panelHead">
                   <div>
-                    <h2>{importedEmails.length ? "已迁移邮件" : "相关邮件线程"}</h2>
-                    <p>{mailLoading ? "正在读取…" : "可按发件人、主题或正文搜索"}</p>
+                    <h2>{mailLoaded ? "已迁移邮件" : "相关邮件线程"}</h2>
+                    <p>
+                      {mailLoading
+                        ? "正在读取…"
+                        : mailLoaded
+                          ? `已显示 ${importedEmails.length} / 共 ${mailTotal} 封`
+                          : "可按发件人、主题或正文搜索"}
+                    </p>
                   </div>
                   <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索邮件" />
                 </div>
@@ -568,7 +628,13 @@ export default function Home() {
                           <em>{email.direction === "outbound" ? "已发送" : "收件"}</em>
                         </button>
                       ))
-                    : visible.map((creator) => (
+                    : connected && mailLoaded
+                      ? (
+                        <div className="emptyMail">
+                          尚未迁移到真实邮件，请点击“迁移全部邮件”。
+                        </div>
+                      )
+                      : visible.map((creator) => (
                         <button key={creator.id} className={selected.id === creator.id ? "selectedMail" : ""} onClick={() => chooseCreator(creator.id)}>
                           <span className="avatar">{initials(creator.name)}</span>
                           <span><strong>{creator.name}</strong><b>{creator.subject}</b><small>{creator.lastOutbound}</small></span>
@@ -576,6 +642,15 @@ export default function Home() {
                         </button>
                       ))}
                 </div>
+                {importedEmails.length < mailTotal && (
+                  <button
+                    className="loadMore"
+                    disabled={mailLoading}
+                    onClick={() => void loadImportedMail(search, true)}
+                  >
+                    {mailLoading ? "正在加载…" : "加载更多邮件"}
+                  </button>
+                )}
               </div>
               {selectedImported ? (
                 <div className="panel threadPanel">

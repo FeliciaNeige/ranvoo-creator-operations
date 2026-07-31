@@ -38,6 +38,7 @@ export async function GET(): Promise<Response> {
         "mail:user_mailbox.message.subject:read",
         "mail:user_mailbox.message.address:read",
         "mail:user_mailbox.message.body:read",
+        "mail:user_mailbox.folder:read",
       ].join(" "),
     );
     authorizeUrl.searchParams.set("state", state);
