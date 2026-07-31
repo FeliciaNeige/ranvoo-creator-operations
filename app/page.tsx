@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
-type Category = "UGC" | "牙医合作" | "商业化红人";
+type Category = "UGC" | "牙医合作" | "商业化红人" | "未分类";
 type View = "dashboard" | "mail" | "creators" | "messages" | "settings";
 
 type Creator = {
@@ -28,6 +28,53 @@ type Creator = {
     trigger: string;
     match: string;
     fields: { field: string; value: string }[];
+  };
+  analysis?: {
+    messageCount: number;
+    threadCount: number;
+    confidence: "高" | "中" | "低";
+    evidence: string[];
+    messageScenario: string;
+    tableStatus: "matched" | "unmatched" | "duplicate" | "unavailable";
+    tableName: string | null;
+    recordId: string | null;
+    unresolvedFields: string[];
+  };
+};
+
+type AnalysisApiItem = {
+  email: string;
+  creatorName: string;
+  category: Category;
+  sourceTable: string | null;
+  targetTable: string | null;
+  messageCount: number;
+  threadCount: number;
+  latestSubject: string;
+  latestAt: number | null;
+  latestSummary: string;
+  lastInboundAt: number | null;
+  lastOutboundAt: number | null;
+  silenceDays: number;
+  stage: string;
+  urgency: Urgency;
+  evidence: string[];
+  nextAction: string;
+  messageScenario: string;
+  confidence: "高" | "中" | "低";
+  transferEligible: boolean;
+  proposedFields: { field: string; value: string | number | null }[];
+  tableMatch: {
+    status: "matched" | "unmatched" | "duplicate" | "unavailable";
+    tableName: string | null;
+    recordId: string | null;
+    duplicateRecordIds: string[];
+    proposedChanges: {
+      field: string;
+      oldValue: unknown;
+      newValue: unknown;
+    }[];
+    unresolvedFields: string[];
   };
 };
 
@@ -205,6 +252,85 @@ function formatMailDate(value?: number | null) {
   }).format(new Date(value));
 }
 
+function toCreator(item: AnalysisApiItem, index: number): Creator {
+  const matchedUpdates = item.tableMatch.proposedChanges.map((change) => ({
+    field: change.field,
+    from: displayFieldValue(change.oldValue),
+    to: displayFieldValue(change.newValue),
+  }));
+  const updates = matchedUpdates.length
+    ? matchedUpdates
+    : [
+        {
+          field: "多维表匹配",
+          from:
+            item.tableMatch.status === "duplicate"
+              ? "发现多条同邮箱记录"
+              : item.tableMatch.status === "unmatched"
+                ? "未找到同邮箱记录"
+                : item.tableMatch.status === "unavailable"
+                  ? "权限或表结构待确认"
+                  : "当前字段无需变化",
+          to:
+            item.tableMatch.status === "matched"
+              ? "无需更新"
+              : "确认匹配后再生成写入预览",
+        },
+      ];
+  const transfer =
+    item.transferEligible && item.sourceTable && item.targetTable
+      ? {
+          source: item.sourceTable,
+          target: item.targetTable,
+          trigger: "最新邮件及历史上下文显示合作或产品试验已明确确认。",
+          match: "执行前将按邮箱、Handle、主页链接依次查重。",
+          fields: [
+            { field: "联系方式", value: item.email },
+            { field: "合作进度", value: item.stage },
+            { field: "更新日期", value: todayLabel },
+          ],
+        }
+      : undefined;
+  return {
+    id: 10_000 + index,
+    name: item.creatorName,
+    handle: "待从多维表匹配",
+    email: item.email,
+    category: item.category,
+    subject: item.latestSubject,
+    stage: item.stage,
+    silence: item.silenceDays,
+    urgency: item.urgency,
+    latest: item.evidence.join("；"),
+    next: item.nextAction,
+    lastInbound: formatMailDate(item.lastInboundAt),
+    lastOutbound: formatMailDate(item.lastOutboundAt),
+    draft: `【待生成：${item.messageScenario}】\n\n系统已完成线程判断。请先核对多维表匹配和真实商业条款，再从对应话术库生成最终回复。`,
+    updates,
+    transfer,
+    analysis: {
+      messageCount: item.messageCount,
+      threadCount: item.threadCount,
+      confidence: item.confidence,
+      evidence: item.evidence,
+      messageScenario: item.messageScenario,
+      tableStatus: item.tableMatch.status,
+      tableName: item.tableMatch.tableName,
+      recordId: item.tableMatch.recordId,
+      unresolvedFields: item.tableMatch.unresolvedFields,
+    },
+  };
+}
+
+function displayFieldValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "number" && value > 1_000_000_000_000) {
+    return formatMailDate(value);
+  }
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
 export default function Home() {
   const [creators, setCreators] = useState(seedCreators);
   const [view, setView] = useState<View>("dashboard");
@@ -288,13 +414,60 @@ export default function Home() {
     setEditing(false);
   }
 
-  function runAnalysis() {
+  async function runAnalysis() {
+    if (!connected) {
+      setNotice("请先连接飞书并完成邮件迁移，再运行真实邮箱分析。");
+      return;
+    }
     setReanalyzing(true);
-    setNotice("正在按最新邮件时间、承诺节点和30天规则重新排序…");
-    window.setTimeout(() => {
+    setNotice("正在按邮箱归并邮件，并以最新邮件结合历史上下文判断进度…");
+    try {
+      const response = await fetch("/api/operations/analyze", {
+        method: "POST",
+        cache: "no-store",
+      });
+      const body = await response.json() as {
+        items?: AnalysisApiItem[];
+        sourceEmailCount?: number;
+        uniqueCreatorCount?: number;
+        deduplicatedCount?: number;
+        baseError?: string | null;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(body.error || "邮箱分析失败。");
+      }
+      const items = body.items ?? [];
+      if (!items.length) {
+        setNotice("没有可分析的真实邮件，请先进入“邮件线程”迁移邮箱内容。");
+        return;
+      }
+      const nextCreators = items.map(toCreator);
+      setCreators(nextCreators);
+      setDrafts(
+        Object.fromEntries(
+          nextCreators.map((creator) => [creator.id, creator.draft]),
+        ),
+      );
+      setSelectedId(nextCreators[0].id);
+      setFilter("全部");
       setReanalyzing(false);
-      setNotice("分析完成：4个线程已检查；1项今日到期，1项需要跟进，1项终止候选。");
-    }, 900);
+      setNotice(
+        `分析完成：${body.sourceEmailCount ?? 0} 封邮件合并为 ${
+          body.uniqueCreatorCount ?? items.length
+        } 个邮箱主记录，去除 ${
+          body.deduplicatedCount ?? 0
+        } 条重复任务。${
+          body.baseError
+            ? ` 邮箱判断已完成；多维表暂未匹配：${body.baseError}`
+            : " 多维表匹配与字段变更预览已生成。"
+        }`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "邮箱分析失败。");
+    } finally {
+      setReanalyzing(false);
+    }
   }
 
   function createTask() {
@@ -809,7 +982,23 @@ function Workspace({
 
       <aside className="detail">
         <div className="detailTop"><div className="avatar large">{initials(selected.name)}</div><div><h2>{selected.name}</h2><p>{selected.handle} · {selected.email}</p></div><span className={`priorityPill p-${selected.urgency}`}>{selected.urgency}</span></div>
-        <div className="route"><span>自动路由</span><strong>{selected.category}</strong><span className="confidence">高置信度</span></div>
+        <div className="route"><span>自动路由</span><strong>{selected.category}</strong><span className="confidence">{selected.analysis?.confidence ?? "高"}置信度</span></div>
+        {selected.analysis && (
+          <div className="analysisMeta">
+            <span><b>{selected.analysis.messageCount}</b>封邮件</span>
+            <span><b>{selected.analysis.threadCount}</b>个线程</span>
+            <span>
+              <b>{selected.analysis.tableName ?? "待路由"}</b>
+              {selected.analysis.tableStatus === "matched"
+                ? "已匹配记录"
+                : selected.analysis.tableStatus === "duplicate"
+                  ? "同邮箱重复，禁止自动写入"
+                  : selected.analysis.tableStatus === "unmatched"
+                    ? "未找到同邮箱记录"
+                    : "多维表待连接"}
+            </span>
+          </div>
+        )}
         <div className="analysisBlock"><label>判断依据</label><p>{selected.latest}</p><label>建议下一步</label><p>{selected.next}</p></div>
         <div className="draftBlock">
           <div className="blockHead"><label>邮件回复预览</label><button onClick={() => onEdit(!editing)}>{editing ? "完成" : "编辑"}</button></div>
