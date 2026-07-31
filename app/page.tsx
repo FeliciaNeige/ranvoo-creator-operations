@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
 type Category = "UGC" | "牙医合作" | "商业化红人";
@@ -173,7 +173,9 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState(1);
   const [approved, setApproved] = useState(false);
   const [notice, setNotice] = useState("");
-  const [connected] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [feishuConfigured, setFeishuConfigured] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(true);
   const [drafts, setDrafts] = useState<Record<number, string>>(
     Object.fromEntries(seedCreators.map((creator) => [creator.id, creator.draft])),
   );
@@ -184,6 +186,26 @@ export default function Home() {
   const [newEmail, setNewEmail] = useState("");
   const [newCategory, setNewCategory] = useState<Category>("UGC");
   const [reanalyzing, setReanalyzing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/feishu/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((status: { configured?: boolean; connected?: boolean }) => {
+        if (cancelled) return;
+        setFeishuConfigured(Boolean(status.configured));
+        setConnected(Boolean(status.connected));
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingConnection(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const visible = useMemo(
     () => creators.filter((creator) =>
@@ -267,6 +289,16 @@ export default function Home() {
     setNotice("执行请求已提交，正在逐项验证邮件发送与表格写回。");
   }
 
+  function connectFeishu() {
+    window.location.assign("/api/auth/feishu/start");
+  }
+
+  async function disconnectFeishu() {
+    await fetch("/api/auth/feishu/disconnect", { method: "POST" });
+    setConnected(false);
+    setNotice("飞书账号已从当前浏览器断开。");
+  }
+
   const pageTitle =
     view === "dashboard" ? "今天需要处理什么？" :
     view === "mail" ? "邮件线程与跟进判断" :
@@ -294,9 +326,18 @@ export default function Home() {
         <div className="sideBottom">
           <div className="syncCard">
             <span className={`statusDot ${connected ? "online" : ""}`} />
-            <div><strong>{connected ? "飞书已连接" : "演示模式"}</strong><p>{connected ? "邮箱与多维表格同步中" : "尚未配置飞书应用授权"}</p></div>
+            <div>
+              <strong>{connected ? "飞书已连接" : checkingConnection ? "正在检查连接" : "演示模式"}</strong>
+              <p>{connected ? "已取得用户授权" : feishuConfigured ? "应用已配置，等待账号授权" : "尚未配置飞书应用授权"}</p>
+            </div>
           </div>
-          <button className="connectButton" onClick={() => setModal("connect")}>连接飞书</button>
+          <button
+            className="connectButton"
+            onClick={connected ? disconnectFeishu : connectFeishu}
+            disabled={checkingConnection || (!feishuConfigured && !connected)}
+          >
+            {connected ? "断开飞书" : checkingConnection ? "检查中…" : "连接飞书"}
+          </button>
           <div className="profile"><span>FZ</span><div><strong>Felicia Zhao</strong><small>RANVOO Team</small></div></div>
         </div>
       </aside>
@@ -405,7 +446,16 @@ export default function Home() {
               </div>
               <strong>需人工确认</strong>
             </article>
-            <article><span className="settingIcon">飞</span><div><h2>飞书连接</h2><p>当前未配置企业自建应用，真实邮箱与多维表格保持只读/不可用。</p></div><button onClick={() => setModal("connect")}>查看接入要求</button></article>
+            <article>
+              <span className="settingIcon">飞</span>
+              <div>
+                <h2>飞书连接</h2>
+                <p>{connected ? "当前浏览器已完成飞书用户授权。" : feishuConfigured ? "企业自建应用已配置，可以开始用户授权。" : "企业自建应用尚未完成配置。"}</p>
+              </div>
+              {connected
+                ? <button onClick={disconnectFeishu}>断开连接</button>
+                : <button onClick={connectFeishu} disabled={!feishuConfigured || checkingConnection}>授权连接</button>}
+            </article>
           </section>
         )}
       </section>
@@ -424,10 +474,14 @@ export default function Home() {
               </>
             ) : (
               <>
-                <p className="eyebrow">FEISHU CONNECTION</p><h2>连接飞书前需要完成</h2>
-                <ol><li>在飞书开放平台创建企业自建应用</li><li>配置邮箱读取/回复和多维表格读写权限</li><li>发布应用版本并由企业管理员审批</li><li>安全配置 App ID 与 App Secret，不写入代码仓库</li></ol>
+                <p className="eyebrow">FEISHU CONNECTION</p><h2>{feishuConfigured ? "飞书应用已配置" : "连接飞书前需要完成"}</h2>
+                {feishuConfigured
+                  ? <p>应用权限、回调地址和加密凭证已经准备好。点击下方按钮后，在飞书页面确认授权即可。</p>
+                  : <ol><li>在飞书开放平台创建企业自建应用</li><li>配置邮箱读取/回复和多维表格读写权限</li><li>发布应用版本并由企业管理员审批</li><li>安全配置 App ID 与 App Secret，不写入代码仓库</li></ol>}
                 <div className="safetyBox">接入后依然不会自动发送或更新。每一批操作都必须先展示预览并由 Felicia 明确确认。</div>
-                <button className="primary modalAction" onClick={() => setModal(null)}>我知道了</button>
+                <button className="primary modalAction" onClick={feishuConfigured ? connectFeishu : () => setModal(null)}>
+                  {feishuConfigured ? "使用飞书授权" : "我知道了"}
+                </button>
               </>
             )}
           </section>
