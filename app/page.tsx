@@ -573,10 +573,10 @@ export default function Home() {
     if (!connected || syncingMail) return;
     setSyncingMail(true);
     setMailError("");
-    let pageToken = mailSync.status === "running"
+    let pageToken = !forceFull && mailSync.status === "running"
       ? mailSync.page_token ?? ""
       : "";
-    let folderIndex = mailSync.status === "running"
+    let folderIndex = !forceFull && mailSync.status === "running"
       ? mailSync.folder_index ?? 0
       : 0;
     let processed = 0;
@@ -590,7 +590,10 @@ export default function Home() {
           body: JSON.stringify({
             pageToken,
             folderIndex,
-            resume: batch === 0 && mailSync.status === "running",
+            resume:
+              !forceFull &&
+              batch === 0 &&
+              mailSync.status === "running",
             full,
           }),
         });
