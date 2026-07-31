@@ -584,16 +584,16 @@ export default function Home() {
     const full = forceFull || mailSync.total_imported === 0;
     try {
       for (let batch = 0; batch < 2000; batch += 1) {
+        const resumeFromServer =
+          !forceFull &&
+          batch === 0 &&
+          mailSync.status === "running";
         const response = await fetch("/api/mail/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            pageToken,
-            folderIndex,
-            resume:
-              !forceFull &&
-              batch === 0 &&
-              mailSync.status === "running",
+            ...(resumeFromServer ? {} : { pageToken, folderIndex }),
+            resume: resumeFromServer,
             full,
           }),
         });
