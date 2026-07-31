@@ -31,7 +31,14 @@ export async function GET(): Promise<Response> {
     authorizeUrl.searchParams.set("response_type", "code");
     authorizeUrl.searchParams.set(
       "scope",
-      "bitable:app mail:user_mailbox.message:send",
+      [
+        "bitable:app",
+        "mail:user_mailbox.message:send",
+        "mail:user_mailbox.message:readonly",
+        "mail:user_mailbox.message.subject:read",
+        "mail:user_mailbox.message.address:read",
+        "mail:user_mailbox.message.body:read",
+      ].join(" "),
     );
     authorizeUrl.searchParams.set("state", state);
     authorizeUrl.searchParams.set("code_challenge", challenge);

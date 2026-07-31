@@ -31,6 +31,27 @@ type Creator = {
   };
 };
 
+type ImportedEmail = {
+  message_id: string;
+  thread_id?: string | null;
+  subject: string;
+  sender_name?: string | null;
+  sender_email?: string | null;
+  recipients?: { name?: string; email: string }[];
+  sent_at?: number | null;
+  snippet?: string | null;
+  body_text?: string | null;
+  direction: "inbound" | "outbound" | "unknown";
+};
+
+type MailSync = {
+  total_imported: number;
+  last_synced_at?: number | null;
+  status: "idle" | "running" | "error";
+  last_error?: string | null;
+  page_token?: string | null;
+};
+
 const todayLabel = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -166,6 +187,17 @@ function initials(name: string) {
   return name.split(" ").map((part) => part[0]).join("");
 }
 
+function formatMailDate(value?: number | null) {
+  if (!value) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Shanghai",
+  }).format(new Date(value));
+}
+
 export default function Home() {
   const [creators, setCreators] = useState(seedCreators);
   const [view, setView] = useState<View>("dashboard");
@@ -186,6 +218,16 @@ export default function Home() {
   const [newEmail, setNewEmail] = useState("");
   const [newCategory, setNewCategory] = useState<Category>("UGC");
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [importedEmails, setImportedEmails] = useState<ImportedEmail[]>([]);
+  const [mailSync, setMailSync] = useState<MailSync>({
+    total_imported: 0,
+    status: "idle",
+  });
+  const [selectedMailId, setSelectedMailId] = useState("");
+  const [mailLoading, setMailLoading] = useState(false);
+  const [syncingMail, setSyncingMail] = useState(false);
+  const [syncProgress, setSyncProgress] = useState("");
+  const [mailError, setMailError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -206,6 +248,14 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (view !== "mail" || !connected) return;
+    const timer = window.setTimeout(() => {
+      void loadImportedMail(search);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [view, connected, search]);
 
   const visible = useMemo(
     () => creators.filter((creator) =>
@@ -293,6 +343,84 @@ export default function Home() {
     window.location.assign("/api/auth/feishu/start");
   }
 
+  async function loadImportedMail(query = "") {
+    setMailLoading(true);
+    setMailError("");
+    try {
+      const response = await fetch(
+        `/api/mail/messages?limit=100&q=${encodeURIComponent(query)}`,
+        { cache: "no-store" },
+      );
+      const body = await response.json() as {
+        items?: ImportedEmail[];
+        total?: number;
+        sync?: MailSync;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error || "邮件列表读取失败。");
+      const items = body.items ?? [];
+      setImportedEmails(items);
+      setMailSync(body.sync ?? { total_imported: body.total ?? 0, status: "idle" });
+      setSelectedMailId((current) =>
+        current && items.some((item) => item.message_id === current)
+          ? current
+          : items[0]?.message_id ?? "",
+      );
+    } catch (error) {
+      setMailError(error instanceof Error ? error.message : "邮件列表读取失败。");
+    } finally {
+      setMailLoading(false);
+    }
+  }
+
+  async function syncAllMail() {
+    if (!connected || syncingMail) return;
+    setSyncingMail(true);
+    setMailError("");
+    let pageToken = mailSync.status === "running"
+      ? mailSync.page_token ?? ""
+      : "";
+    let processed = 0;
+    try {
+      for (let batch = 0; batch < 500; batch += 1) {
+        const response = await fetch("/api/mail/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pageToken,
+            resume: batch === 0 && mailSync.status === "running",
+          }),
+        });
+        const result = await response.json() as {
+          imported?: number;
+          total?: number;
+          hasMore?: boolean;
+          pageToken?: string | null;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(result.error || "邮件同步失败。");
+        processed += result.imported ?? 0;
+        setSyncProgress(
+          `已检查 ${processed} 封，本网站现有 ${result.total ?? 0} 封邮件…`,
+        );
+        if (!result.hasMore || !result.pageToken) break;
+        pageToken = result.pageToken;
+      }
+      await loadImportedMail(search);
+      setSyncProgress(
+        processed > 0
+          ? `同步完成：本次新增或更新 ${processed} 封邮件。`
+          : "同步完成：没有发现新邮件。",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "邮件同步失败。";
+      setMailError(message);
+      setSyncProgress("");
+    } finally {
+      setSyncingMail(false);
+    }
+  }
+
   async function disconnectFeishu() {
     await fetch("/api/auth/feishu/disconnect", { method: "POST" });
     setConnected(false);
@@ -304,6 +432,9 @@ export default function Home() {
     view === "mail" ? "邮件线程与跟进判断" :
     view === "creators" ? "红人合作总览" :
     view === "messages" ? "达人建联话术中心" : "工作流与安全设置";
+  const selectedImported =
+    importedEmails.find((email) => email.message_id === selectedMailId) ??
+    importedEmails[0];
 
   return (
     <main className="shell">
@@ -377,27 +508,106 @@ export default function Home() {
         )}
 
         {view === "mail" && (
-          <section className="pageGrid">
-            <div className="panel">
-              <div className="panelHead"><div><h2>相关邮件线程</h2><p>按最新有效往来判断，不只看标题</p></div><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索姓名、邮箱或标题" /></div>
-              <div className="mailList">
-                {visible.map((creator) => (
-                  <button key={creator.id} className={selected.id === creator.id ? "selectedMail" : ""} onClick={() => chooseCreator(creator.id)}>
-                    <span className="avatar">{initials(creator.name)}</span>
-                    <span><strong>{creator.name}</strong><b>{creator.subject}</b><small>{creator.lastOutbound}</small></span>
-                    <em>{creator.silence}天</em>
-                  </button>
-                ))}
+          <>
+            <section className="mailSyncBar">
+              <div className="mailSyncIcon">↻</div>
+              <div>
+                <strong>飞书邮箱同步</strong>
+                <p>
+                  {mailSync.total_imported > 0
+                    ? `已迁移 ${mailSync.total_imported} 封 · ${
+                        mailSync.last_synced_at
+                          ? `上次同步 ${formatMailDate(mailSync.last_synced_at)}`
+                          : "等待下次同步"
+                      }`
+                    : "首次同步会分批迁移历史邮件，之后只检查新增内容。"}
+                </p>
+                {(syncProgress || mailError) && (
+                  <small className={mailError ? "syncError" : ""}>
+                    {mailError || syncProgress}
+                  </small>
+                )}
               </div>
-            </div>
-            <div className="panel threadPanel">
-              <span className="categoryTag">{selected.category}</span>
-              <h2>{selected.name}</h2><p className="threadSubject">{selected.subject}</p>
-              <div className="message incoming"><small>最近来信</small><p>{selected.lastInbound}</p></div>
-              <div className="message outgoing"><small>最近发出</small><p>{selected.lastOutbound}</p></div>
-              <div className="threadDecision"><strong>当前判断：{selected.stage}</strong><p>{selected.latest}</p><button onClick={() => navigate("dashboard")}>查看回复与表格变更预览 →</button></div>
-            </div>
-          </section>
+              {connected ? (
+                <button onClick={syncAllMail} disabled={syncingMail}>
+                  {syncingMail
+                    ? "正在同步…"
+                    : mailSync.status === "running"
+                      ? "继续同步"
+                      : mailSync.total_imported
+                        ? "同步新邮件"
+                        : "迁移全部邮件"}
+                </button>
+              ) : (
+                <button onClick={connectFeishu}>先连接飞书</button>
+              )}
+            </section>
+            <section className="pageGrid">
+              <div className="panel">
+                <div className="panelHead">
+                  <div>
+                    <h2>{importedEmails.length ? "已迁移邮件" : "相关邮件线程"}</h2>
+                    <p>{mailLoading ? "正在读取…" : "可按发件人、主题或正文搜索"}</p>
+                  </div>
+                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索邮件" />
+                </div>
+                <div className="mailList">
+                  {importedEmails.length > 0
+                    ? importedEmails.map((email) => (
+                        <button
+                          key={email.message_id}
+                          className={selectedImported?.message_id === email.message_id ? "selectedMail" : ""}
+                          onClick={() => setSelectedMailId(email.message_id)}
+                        >
+                          <span className="avatar">{initials(email.sender_name || email.sender_email || "邮件")}</span>
+                          <span>
+                            <strong>{email.sender_name || email.sender_email || "未知发件人"}</strong>
+                            <b>{email.subject}</b>
+                            <small>{formatMailDate(email.sent_at)}</small>
+                          </span>
+                          <em>{email.direction === "outbound" ? "已发送" : "收件"}</em>
+                        </button>
+                      ))
+                    : visible.map((creator) => (
+                        <button key={creator.id} className={selected.id === creator.id ? "selectedMail" : ""} onClick={() => chooseCreator(creator.id)}>
+                          <span className="avatar">{initials(creator.name)}</span>
+                          <span><strong>{creator.name}</strong><b>{creator.subject}</b><small>{creator.lastOutbound}</small></span>
+                          <em>{creator.silence}天</em>
+                        </button>
+                      ))}
+                </div>
+              </div>
+              {selectedImported ? (
+                <div className="panel threadPanel">
+                  <span className="categoryTag">
+                    {selectedImported.direction === "outbound" ? "已发送" : "收件箱"}
+                  </span>
+                  <h2>{selectedImported.sender_name || selectedImported.sender_email || "未知发件人"}</h2>
+                  <p className="threadSubject">{selectedImported.subject}</p>
+                  <div className="mailMeta">
+                    <span><b>发件人</b>{selectedImported.sender_email || "—"}</span>
+                    <span><b>时间</b>{formatMailDate(selectedImported.sent_at)}</span>
+                  </div>
+                  <div className="importedBody">
+                    {selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
+                  </div>
+                  <div className="threadDecision">
+                    <strong>下一步：识别红人并匹配合作记录</strong>
+                    <p>邮件已保存在网站中。自动判断和写回表格仍会遵守确认门槛。</p>
+                    <button onClick={() => navigate("dashboard")}>进入红人跟进工作台 →</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="panel threadPanel">
+                  <span className="categoryTag">{selected.category}</span>
+                  <h2>{selected.name}</h2><p className="threadSubject">{selected.subject}</p>
+                  <div className="message incoming"><small>最近来信</small><p>{selected.lastInbound}</p></div>
+                  <div className="message outgoing"><small>最近发出</small><p>{selected.lastOutbound}</p></div>
+                  <div className="threadDecision"><strong>当前判断：{selected.stage}</strong><p>{selected.latest}</p><button onClick={() => navigate("dashboard")}>查看回复与表格变更预览 →</button></div>
+                </div>
+              )}
+            </section>
+          </>
         )}
 
         {view === "creators" && (

@@ -90,7 +90,12 @@ export async function GET(request: Request): Promise<Response> {
         ["Location", location.toString()],
         [
           "Set-Cookie",
-          cookie(SESSION_COOKIE, await seal(session), expiresIn, "/"),
+          cookie(
+            SESSION_COOKIE,
+            await seal(session),
+            30 * 24 * 60 * 60,
+            "/",
+          ),
         ],
         ["Set-Cookie", clearCookie(OAUTH_COOKIE, "/api/auth/feishu")],
         ["Cache-Control", "no-store"],

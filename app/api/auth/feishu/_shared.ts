@@ -5,6 +5,7 @@ export const FEISHU_AUTHORIZE_URL =
   "https://accounts.feishu.cn/open-apis/authen/v1/authorize";
 export const FEISHU_TOKEN_URL =
   "https://open.feishu.cn/open-apis/authen/v2/oauth/token";
+export const FEISHU_API_BASE = "https://open.feishu.cn/open-apis";
 export const OAUTH_COOKIE = "ranvoo_feishu_oauth";
 export const SESSION_COOKIE = "ranvoo_feishu_session";
 
@@ -19,6 +20,21 @@ export type FeishuSession = {
   refreshToken?: string;
   expiresAt: number;
   scope?: string;
+};
+
+type TokenResponse = {
+  code?: number;
+  msg?: string;
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+  data?: {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
 };
 
 export function requiredEnv(name: string): string {
@@ -94,6 +110,59 @@ export function cookie(
 
 export function clearCookie(name: string, path = "/"): string {
   return cookie(name, "", 0, path);
+}
+
+export async function readFeishuSession(
+  request: Request,
+): Promise<FeishuSession | null> {
+  const value = readCookie(request, SESSION_COOKIE);
+  return value ? unseal<FeishuSession>(value) : null;
+}
+
+export async function ensureFeishuSession(
+  request: Request,
+): Promise<{ session: FeishuSession; setCookie?: string } | null> {
+  const session = await readFeishuSession(request);
+  if (!session?.accessToken) return null;
+  if (session.expiresAt > Date.now() + 60_000) return { session };
+  if (!session.refreshToken) return null;
+
+  const response = await fetch(FEISHU_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      client_id: requiredEnv("FEISHU_APP_ID"),
+      client_secret: requiredEnv("FEISHU_APP_SECRET"),
+      refresh_token: session.refreshToken,
+    }),
+  });
+  const body = (await response.json()) as TokenResponse;
+  const token = body.data ?? body;
+  if (
+    !response.ok ||
+    (typeof body.code === "number" && body.code !== 0) ||
+    !token.access_token
+  ) {
+    return null;
+  }
+
+  const expiresIn = Math.max(60, token.expires_in ?? 7200);
+  const refreshed: FeishuSession = {
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? session.refreshToken,
+    expiresAt: Date.now() + expiresIn * 1000,
+    scope: token.scope ?? session.scope,
+  };
+  return {
+    session: refreshed,
+    setCookie: cookie(
+      SESSION_COOKIE,
+      await seal(refreshed),
+      30 * 24 * 60 * 60,
+      "/",
+    ),
+  };
 }
 
 async function sessionKey(): Promise<CryptoKey> {
