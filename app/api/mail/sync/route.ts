@@ -102,14 +102,14 @@ export async function POST(request: Request): Promise<Response> {
 
     const messages = pageAlreadyKnown
       ? []
-      : await mapWithConcurrency(ids, 1, async (id) => {
+      : await mapWithConcurrency(ids, 3, async (id) => {
           const detail = await authorizedMailRequest<MessageData>(
             request,
             `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}?format=plain_text_full`,
           );
           setCookie ??= detail.setCookie;
           const normalized = normalizeMessage(id, detail.data, folder);
-          await delay(160);
+          await delay(240);
           return normalized;
         });
 
