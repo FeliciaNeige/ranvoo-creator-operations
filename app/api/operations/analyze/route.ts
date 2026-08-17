@@ -23,6 +23,7 @@ type EmailRow = {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    const phase = new URL(request.url).searchParams.get("phase") ?? "full";
     const db = getMailDb();
     await ensureMailTables(db);
     const rows = await db
@@ -50,6 +51,36 @@ export async function POST(request: Request): Promise<Response> {
     }));
     const analyses = analyzeCreatorThreads(messages);
     const client = await createFeishuClient(request);
+    if (phase === "email") {
+      const headers = new Headers({ "Cache-Control": "no-store" });
+      if (client.setCookie) headers.set("Set-Cookie", client.setCookie);
+      return Response.json(
+        {
+          items: analyses.map((analysis) => ({
+            ...analysis,
+            tableMatch: {
+              status: "matching",
+              tableName: analysis.sourceTable,
+              tableId: null,
+              recordId: null,
+              duplicateRecordIds: [],
+              currentStage: null,
+              proposedChanges: [],
+              unresolvedFields: [],
+              message: analysis.sourceTable
+                ? `正在匹配 ${analysis.sourceTable}`
+                : "未分类邮件需要先确认合作类型",
+            },
+          })),
+          summary: summarize(analyses),
+          sourceEmailCount: messages.length,
+          uniqueCreatorCount: analyses.length,
+          deduplicatedCount: Math.max(0, messages.length - analyses.length),
+          baseError: null,
+        },
+        { headers },
+      );
+    }
     let baseError: string | null = null;
     let matches = new Map();
     try {
@@ -77,6 +108,7 @@ export async function POST(request: Request): Promise<Response> {
               currentStage: null,
               proposedChanges: [],
               unresolvedFields: [],
+              message: baseError || "多维表暂时无法读取",
             },
         })),
         summary: summarize(analyses),

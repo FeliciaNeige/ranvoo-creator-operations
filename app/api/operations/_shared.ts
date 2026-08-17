@@ -33,7 +33,7 @@ type RecordListData = {
 };
 
 export type BaseMatch = {
-  status: "matched" | "unmatched" | "duplicate" | "unavailable";
+  status: "matching" | "matched" | "unmatched" | "duplicate" | "unavailable";
   tableName: string | null;
   tableId: string | null;
   recordId: string | null;
@@ -46,6 +46,7 @@ export type BaseMatch = {
     reason: string;
   }[];
   unresolvedFields: string[];
+  message?: string | null;
 };
 
 export class OperationsApiError extends Error {
@@ -114,14 +115,16 @@ export async function matchAnalysesToBase(
     }
   >();
 
-  for (const tableName of requestedTableNames) {
-    const table = tables.find((item) => item.name === tableName);
-    if (!table) continue;
-    recordsByTable.set(tableName as string, {
-      tableId: table.table_id,
-      records: await listAllRecords(client, appToken, table.table_id),
-    });
-  }
+  await Promise.all(
+    [...requestedTableNames].map(async (tableName) => {
+      const table = tables.find((item) => item.name === tableName);
+      if (!table) return;
+      recordsByTable.set(tableName as string, {
+        tableId: table.table_id,
+        records: await listAllRecords(client, appToken, table.table_id),
+      });
+    }),
+  );
 
   const result = new Map<string, BaseMatch>();
   for (const analysis of analyses) {
@@ -147,6 +150,7 @@ export async function matchAnalysesToBase(
         currentStage: null,
         proposedChanges: [],
         unresolvedFields: [],
+        message: `在 ${tableName} 中没有找到邮箱 ${analysis.email}`,
       });
       continue;
     }
@@ -160,6 +164,7 @@ export async function matchAnalysesToBase(
         currentStage: null,
         proposedChanges: [],
         unresolvedFields: [],
+        message: `在 ${tableName} 中找到 ${matches.length} 条同邮箱记录，需要人工确认`,
       });
       continue;
     }
@@ -254,6 +259,7 @@ function buildMatchedPreview(
     ),
     proposedChanges,
     unresolvedFields,
+    message: `已按邮箱匹配到 ${tableName}`,
   };
 }
 
@@ -344,6 +350,9 @@ function unavailableMatch(
     currentStage: null,
     proposedChanges: [],
     unresolvedFields: [],
+    message: tableName
+      ? `没有找到名为“${tableName}”的来源表`
+      : "邮件尚未归类，无法确定来源表",
   };
 }
 

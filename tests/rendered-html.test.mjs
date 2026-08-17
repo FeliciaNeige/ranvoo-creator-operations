@@ -5,10 +5,11 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 test("ships the RANVOO operations dashboard", async () => {
-  const [page, layout, readme] = await Promise.all([
+  const [page, layout, readme, analysisRoute] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("README.md", root), "utf8"),
+    readFile(new URL("app/api/operations/analyze/route.ts", root), "utf8"),
   ]);
 
   assert.match(page, /<strong>RANVOO<\/strong>/);
@@ -17,6 +18,11 @@ test("ships the RANVOO operations dashboard", async () => {
   assert.match(page, /UGC/);
   assert.match(page, /牙医合作/);
   assert.match(page, /商业化红人/);
+  assert.match(page, /飞书总表状态/);
+  assert.match(page, /总表匹配中/);
+  assert.match(page, /creatorTypeLabel/);
+  assert.match(analysisRoute, /phase === "email"/);
+  assert.match(analysisRoute, /status: "matching"/);
   assert.match(layout, /RANVOO Creator Operations/);
   assert.match(readme, /ranvoo-creator-operations/);
 });

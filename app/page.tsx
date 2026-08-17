@@ -42,7 +42,7 @@ type Creator = {
     evidence: string[];
     messageScenario: string;
     emailStage: string;
-    tableStatus: "matched" | "unmatched" | "duplicate" | "unavailable";
+    tableStatus: "matching" | "matched" | "unmatched" | "duplicate" | "unavailable";
     tableName: string | null;
     tableId: string | null;
     recordId: string | null;
@@ -53,6 +53,7 @@ type Creator = {
       newValue: unknown;
     }[];
     unresolvedFields: string[];
+    tableMessage: string | null;
   };
 };
 
@@ -80,7 +81,7 @@ type AnalysisApiItem = {
   transferEligible: boolean;
   proposedFields: { field: string; value: string | number | null }[];
   tableMatch: {
-    status: "matched" | "unmatched" | "duplicate" | "unavailable";
+    status: "matching" | "matched" | "unmatched" | "duplicate" | "unavailable";
     tableName: string | null;
     tableId: string | null;
     recordId: string | null;
@@ -92,6 +93,7 @@ type AnalysisApiItem = {
       newValue: unknown;
     }[];
     unresolvedFields: string[];
+    message?: string | null;
   };
 };
 
@@ -487,6 +489,7 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
       tableStage,
       proposedChanges: item.tableMatch.proposedChanges,
       unresolvedFields: item.tableMatch.unresolvedFields,
+      tableMessage: item.tableMatch.message ?? null,
     },
   };
 }
@@ -525,13 +528,20 @@ function counterpartyEmail(email: ImportedEmail): string {
 }
 
 function tableStageLabel(creator?: Creator): string {
-  if (!creator?.analysis) return "正在匹配总表";
+  if (!creator?.analysis || creator.analysis.tableStatus === "matching") return "总表匹配中…";
   if (creator.analysis.tableStatus === "matched") {
     return creator.analysis.tableStage || "总表状态为空";
   }
   if (creator.analysis.tableStatus === "unmatched") return "总表未匹配";
   if (creator.analysis.tableStatus === "duplicate") return "总表重复记录";
   return "总表待连接";
+}
+
+function creatorTypeLabel(category?: Category): string {
+  if (category === "UGC") return "UGC 红人";
+  if (category === "牙医合作") return "牙医 / 专业人员";
+  if (category === "商业化红人") return "商业化红人";
+  return "类型待确认";
 }
 
 export default function Home() {
@@ -629,9 +639,9 @@ export default function Home() {
   }, [view, connected, search]);
 
   useEffect(() => {
-    if (view !== "mail" || !connected || analysisLoaded || reanalyzing) return;
-    void runAnalysis(true);
-    // 邮件页首次进入时自动加载飞书总表标签。
+    if ((view !== "mail" && view !== "dashboard") || !connected || analysisLoaded || reanalyzing) return;
+    void runAnalysis();
+    // 今日工作台与邮件页首次进入时自动加载分类和飞书总表标签。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, connected, analysisLoaded, reanalyzing]);
 
@@ -689,30 +699,30 @@ export default function Home() {
     setEditing(false);
   }
 
-  async function runAnalysis(silent = false) {
+  async function runAnalysis() {
     if (!connected) {
       setNotice("请先连接飞书并完成邮件迁移，再运行真实邮箱分析。");
       return;
     }
     setReanalyzing(true);
-    if (!silent) setNotice("正在按邮箱归并邮件，并以最新邮件结合历史上下文判断进度…");
+    setNotice("正在读取邮件：合作类型会先显示，随后继续匹配飞书总表进度…");
     try {
-      const response = await fetch("/api/operations/analyze", {
+      const emailResponse = await fetch("/api/operations/analyze?phase=email", {
         method: "POST",
         cache: "no-store",
       });
-      const body = await readJsonResponse<{
+      const emailBody = await readJsonResponse<{
         items?: AnalysisApiItem[];
         sourceEmailCount?: number;
         uniqueCreatorCount?: number;
         deduplicatedCount?: number;
         baseError?: string | null;
         error?: string;
-      }>(response, "邮箱分析失败。");
-      if (!response.ok) {
-        throw new Error(body.error || "邮箱分析失败。");
+      }>(emailResponse, "邮箱分析失败。");
+      if (!emailResponse.ok) {
+        throw new Error(emailBody.error || "邮箱分析失败。");
       }
-      const items = body.items ?? [];
+      const items = emailBody.items ?? [];
       if (!items.length) {
         setNotice("没有可分析的真实邮件，请先进入“邮件线程”迁移邮箱内容。");
         return;
@@ -735,18 +745,52 @@ export default function Home() {
       setSelectedId(nextCreators[0].id);
       setFilter("全部");
       setAnalysisLoaded(true);
-      setReanalyzing(false);
-      if (!silent) setNotice(
-        `分析完成：${body.sourceEmailCount ?? 0} 封邮件合并为 ${
-          body.uniqueCreatorCount ?? items.length
-        } 个邮箱主记录，去除 ${
-          body.deduplicatedCount ?? 0
-        } 条重复任务。${
-          body.baseError
-            ? ` 邮箱判断已完成；多维表暂未匹配：${body.baseError}`
-            : " 多维表匹配与字段变更预览已生成。"
-        }`,
+      setNotice(
+        `邮件分类已显示：${emailBody.sourceEmailCount ?? 0} 封邮件合并为 ${
+          emailBody.uniqueCreatorCount ?? items.length
+        } 个邮箱账号。正在匹配飞书总表，请稍候…`,
       );
+
+      try {
+        const baseResponse = await fetch("/api/operations/analyze?phase=base", {
+          method: "POST",
+          cache: "no-store",
+          signal: AbortSignal.timeout(60_000),
+        });
+        const baseBody = await readJsonResponse<{
+          items?: AnalysisApiItem[];
+          sourceEmailCount?: number;
+          uniqueCreatorCount?: number;
+          deduplicatedCount?: number;
+          baseError?: string | null;
+          error?: string;
+        }>(baseResponse, "飞书总表匹配失败。");
+        if (!baseResponse.ok) throw new Error(baseBody.error || "飞书总表匹配失败。");
+        const matchedCreators = (baseBody.items ?? []).map(toCreator);
+        if (matchedCreators.length) setCreators(matchedCreators);
+        setNotice(
+          baseBody.baseError
+            ? `邮件类型已完成；飞书总表匹配失败：${baseBody.baseError}`
+            : `分析完成：${baseBody.uniqueCreatorCount ?? matchedCreators.length} 个邮箱账号已显示合作类型与总表进度。`,
+        );
+      } catch (baseError) {
+        const message = baseError instanceof DOMException && baseError.name === "TimeoutError"
+          ? "匹配超过60秒，已停止等待。请稍后点“重新分析”，邮件类型仍可正常查看。"
+          : baseError instanceof Error
+            ? baseError.message
+            : "飞书总表暂时无法读取。";
+        setCreators((current) => current.map((creator) => creator.analysis
+          ? {
+              ...creator,
+              analysis: {
+                ...creator.analysis,
+                tableStatus: "unavailable",
+                tableMessage: message,
+              },
+            }
+          : creator));
+        setNotice(`邮件类型已完成；飞书总表匹配失败：${message}`);
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "邮箱分析失败。");
     } finally {
@@ -1181,7 +1225,7 @@ export default function Home() {
             <p className="sub">读取与整理可以自动完成；发送邮件、更新表格和终止合作必须由你确认。</p>
           </div>
           <div className="headerActions">
-            <button className="ghost" onClick={() => void runAnalysis(false)} disabled={reanalyzing}>{reanalyzing ? "分析中…" : "↻ 重新分析"}</button>
+            <button className="ghost" onClick={() => void runAnalysis()} disabled={reanalyzing}>{reanalyzing ? "匹配总表中…" : "↻ 重新分析"}</button>
             <button className="primary" onClick={() => setModal("new")}>＋ 新建任务</button>
           </div>
         </header>
@@ -1329,7 +1373,10 @@ export default function Home() {
                             <b>{email.subject}</b>
                             <small>{formatMailDate(email.sent_at)} · 同邮箱 {email.message_count ?? 1} 封</small>
                           </span>
-                          <em className="mailStageTag">{tableStageLabel(creator)}</em>
+                          <span className="mailTagStack">
+                            <em className={`creatorTypeTag type-${creator?.category ?? "未分类"}`}>{creatorTypeLabel(creator?.category)}</em>
+                            <em className={`mailStageTag status-${creator?.analysis?.tableStatus ?? "matching"}`}>{tableStageLabel(creator)}</em>
+                          </span>
                         </button>
                       );})
                     : connected && mailLoaded
@@ -1362,9 +1409,14 @@ export default function Home() {
                     <span className="avatar">FZ</span>
                     <div><b>当前邮件账户</b><strong>Felicia · 飞书邮箱</strong><small>{connected ? "已连接，可在本页预览与回复" : "未连接"}</small></div>
                   </div>
-                  <span className="categoryTag">
-                    {selectedMailCreator?.category ?? (selectedImported.direction === "outbound" ? "已发送" : "收件箱")}
-                  </span>
+                  <div className="threadBadges">
+                    <span className={`categoryTag type-${selectedMailCreator?.category ?? "未分类"}`}>
+                      {creatorTypeLabel(selectedMailCreator?.category)}
+                    </span>
+                    <span className={`categoryTag stageTag status-${selectedMailCreator?.analysis?.tableStatus ?? "matching"}`}>
+                      {tableStageLabel(selectedMailCreator)}
+                    </span>
+                  </div>
                   <h2>{selectedMailDisplayName}</h2>
                   <p className="threadSubject">{selectedImported.subject}</p>
                   <div className="mailMeta">
@@ -1372,7 +1424,7 @@ export default function Home() {
                     <span><b>时间</b>{formatMailDate(selectedImported.sent_at)}</span>
                   </div>
                   <div className="mailWorkflowBridge">
-                    <span><b>飞书总表标签</b>{tableStageLabel(selectedMailCreator)}</span>
+                    <span><b>飞书总表匹配</b>{selectedMailCreator?.analysis?.tableMessage || tableStageLabel(selectedMailCreator)}</span>
                     <button onClick={() => {
                       if (selectedMailCreator) chooseCreator(selectedMailCreator.id);
                       navigate("dashboard");
@@ -1611,7 +1663,15 @@ function Workspace({
             <button key={creator.id} className={`taskCard ${selected.id === creator.id ? "current" : ""}`} onClick={() => onChoose(creator.id)}>
               <div className={`priorityPill p-${creator.urgency}`}>{creator.urgency}</div>
               <div className="avatar">{initials(creator.name)}</div>
-              <div className="taskMain"><div className="taskTitle"><strong>{creator.name}</strong><span>{creator.category}</span></div><p>{creator.subject}</p><small>{creator.stage} · {creator.silence}天未收到回复</small></div>
+              <div className="taskMain">
+                <div className="taskTitle"><strong>{creator.name}</strong></div>
+                <div className="taskBadges">
+                  <span className={`creatorTypeTag type-${creator.category}`}>{creatorTypeLabel(creator.category)}</span>
+                  <span className={`creatorProgressTag status-${creator.analysis?.tableStatus ?? "matching"}`}>{tableStageLabel(creator)}</span>
+                </div>
+                <p>{creator.subject}</p>
+                <small>{creator.urgency} · {creator.silence}天未收到回复</small>
+              </div>
               <span className="chevron">›</span>
             </button>
           ))}
@@ -1620,24 +1680,31 @@ function Workspace({
 
       <aside className="detail">
         <div className="detailTop"><div className="avatar large">{initials(selected.name)}</div><div><h2>{selected.name}</h2><p>{selected.handle} · {selected.email}</p></div><span className={`priorityPill p-${selected.urgency}`}>{selected.urgency}</span></div>
-        <div className="route"><span>自动路由</span><strong>{selected.category}</strong><span className="confidence">{selected.analysis?.confidence ?? "高"}置信度</span></div>
+        <div className="route"><span>合作类型</span><strong>{creatorTypeLabel(selected.category)}</strong><span className="confidence">{selected.analysis?.confidence ?? "高"}置信度</span></div>
         <div className="statusSource">
-          <span><b>飞书总表状态</b>{selected.analysis?.tableStage ?? "未匹配"}</span>
+          <span className={`status-${selected.analysis?.tableStatus ?? "matching"}`}><b>飞书总表状态</b>{tableStageLabel(selected)}</span>
           <span><b>时间提醒</b>{selected.urgency} · {selected.silence}天</span>
         </div>
+        {selected.analysis?.tableMessage && (
+          <p className={`baseMatchDetail statusText-${selected.analysis.tableStatus}`}>
+            {selected.analysis.tableMessage}
+          </p>
+        )}
         {selected.analysis && (
           <div className="analysisMeta">
             <span><b>{selected.analysis.messageCount}</b>封邮件</span>
             <span><b>{selected.analysis.threadCount}</b>个线程</span>
             <span>
               <b>{selected.analysis.tableName ?? "待路由"}</b>
-              {selected.analysis.tableStatus === "matched"
+              {selected.analysis.tableStatus === "matching"
+                ? "正在读取并匹配总表"
+                : selected.analysis.tableStatus === "matched"
                 ? "已匹配记录"
                 : selected.analysis.tableStatus === "duplicate"
                   ? "同邮箱重复，禁止自动写入"
                   : selected.analysis.tableStatus === "unmatched"
                     ? "未找到同邮箱记录"
-                    : "多维表待连接"}
+                    : selected.analysis.tableMessage || "多维表待连接"}
             </span>
           </div>
         )}
