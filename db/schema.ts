@@ -15,6 +15,8 @@ export const emailMessages = sqliteTable("email_messages", {
   bodyHtml: text("body_html"),
   labelsJson: text("labels_json").notNull().default("[]"),
   direction: text("direction").notNull().default("unknown"),
+  reviewStatus: text("review_status").notNull().default("active"),
+  reviewedAt: integer("reviewed_at"),
   rawJson: text("raw_json"),
   importedAt: integer("imported_at").notNull(),
   updatedAt: integer("updated_at").notNull(),

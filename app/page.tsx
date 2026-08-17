@@ -41,9 +41,11 @@ type Creator = {
     confidence: "高" | "中" | "低";
     evidence: string[];
     messageScenario: string;
+    emailStage: string;
     tableStatus: "matched" | "unmatched" | "duplicate" | "unavailable";
     tableName: string | null;
     recordId: string | null;
+    tableStage: string | null;
     unresolvedFields: string[];
   };
 };
@@ -76,6 +78,7 @@ type AnalysisApiItem = {
     tableName: string | null;
     recordId: string | null;
     duplicateRecordIds: string[];
+    currentStage: string | null;
     proposedChanges: {
       field: string;
       oldValue: unknown;
@@ -98,6 +101,21 @@ type ImportedEmail = {
   snippet?: string | null;
   body_text?: string | null;
   direction: "inbound" | "outbound" | "unknown";
+  review_status?: "active" | "archive" | "trash";
+};
+
+type ReplyControls = {
+  tone: "warm" | "professional" | "friendly" | "firm";
+  emotion: "enthusiastic" | "balanced" | "restrained";
+  length: "short" | "standard" | "detailed";
+  language: "English" | "Spanish";
+};
+
+const defaultReplyControls: ReplyControls = {
+  tone: "warm",
+  emotion: "balanced",
+  length: "standard",
+  language: "English",
 };
 
 type MailSync = {
@@ -371,6 +389,11 @@ function ImportedEmailBody({ value }: { value: string }) {
 }
 
 function toCreator(item: AnalysisApiItem, index: number): Creator {
+  const tableStage = item.tableMatch.currentStage?.trim() || null;
+  const stageConflict = Boolean(tableStage && tableStage !== item.stage);
+  const tableIsClosed = Boolean(
+    tableStage && /completed|declined|terminated|已完成|已拒绝|已终止|不合作/i.test(tableStage),
+  );
   const matchedUpdates = item.tableMatch.proposedChanges.map((change) => ({
     field: change.field,
     from: displayFieldValue(change.oldValue),
@@ -416,10 +439,10 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
     email: item.email,
     category: item.category,
     subject: item.latestSubject,
-    stage: item.stage,
+    stage: tableStage ?? item.stage,
     silence: item.silenceDays,
-    urgency: item.urgency,
-    latest: item.evidence.join("；"),
+    urgency: tableIsClosed ? "观察" : item.urgency,
+    latest: `${stageConflict ? `状态差异：飞书总表为“${tableStage}”，邮件推断为“${item.stage}”；需人工确认后才能改表。` : tableStage ? `当前状态以飞书总表“${tableStage}”为准。` : ""}${item.evidence.join("；")}`,
     next: item.nextAction,
     lastInbound: formatMailDate(item.lastInboundAt),
     lastOutbound: formatMailDate(item.lastOutboundAt),
@@ -433,9 +456,11 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
       confidence: item.confidence,
       evidence: item.evidence,
       messageScenario: item.messageScenario,
+      emailStage: item.stage,
       tableStatus: item.tableMatch.status,
       tableName: item.tableMatch.tableName,
       recordId: item.tableMatch.recordId,
+      tableStage,
       unresolvedFields: item.tableMatch.unresolvedFields,
     },
   };
@@ -448,6 +473,29 @@ function displayFieldValue(value: unknown): string {
   }
   if (typeof value === "string") return value;
   return JSON.stringify(value);
+}
+
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text();
+  if (!text) {
+    throw new Error(response.ok ? fallbackMessage : `服务暂时无响应（${response.status}），请稍后重试。`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const looksLikeHtml = /<!doctype|<html/i.test(text);
+    throw new Error(
+      looksLikeHtml
+        ? "Cloudflare 刚才返回了临时错误页，已保留现有进度，请稍后继续。"
+        : fallbackMessage,
+    );
+  }
+}
+
+function counterpartyEmail(email: ImportedEmail): string {
+  return email.direction === "inbound"
+    ? email.sender_email?.toLowerCase() ?? ""
+    : email.recipients?.[0]?.email?.toLowerCase() ?? email.sender_email?.toLowerCase() ?? "";
 }
 
 export default function Home() {
@@ -491,6 +539,8 @@ export default function Home() {
   const [syncProgress, setSyncProgress] = useState("");
   const [mailError, setMailError] = useState("");
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const [threadEmails, setThreadEmails] = useState<ImportedEmail[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
   const syncAllMailRef = useRef<(forceFull?: boolean) => Promise<void>>(
     async () => {},
   );
@@ -536,6 +586,8 @@ export default function Home() {
       void loadImportedMail(search, false);
     }, 250);
     return () => window.clearTimeout(timer);
+    // 搜索和页面切换时刷新；加载函数保持使用当前分页状态。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, connected, search]);
 
   const visible = useMemo(
@@ -545,7 +597,27 @@ export default function Home() {
     ),
     [creators, filter, search],
   );
+  const urgencyCounts = useMemo(() => Object.fromEntries(
+    filterItems.slice(1).map((urgency) => [urgency, creators.filter((creator) => creator.urgency === urgency).length]),
+  ) as Record<Urgency, number>, [creators]);
   const selected = creators.find((creator) => creator.id === selectedId) ?? creators[0];
+  const selectedImported =
+    importedEmails.find((email) => email.message_id === selectedMailId) ??
+    importedEmails[0];
+  const selectedMailEmail = selectedImported ? counterpartyEmail(selectedImported) : "";
+  const selectedMailCreator = creators.find((creator) => creator.email.toLowerCase() === selectedMailEmail);
+
+  useEffect(() => {
+    if (!connected || !selected?.email) return;
+    void loadThread(selected.email);
+  }, [connected, selected?.email]);
+
+  useEffect(() => {
+    if (view !== "mail" || !selectedImported) return;
+    const email = counterpartyEmail(selectedImported);
+    if (email) void loadThread(email);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, selectedImported?.message_id]);
 
   function chooseCreator(id: number) {
     setSelectedId(id);
@@ -574,14 +646,14 @@ export default function Home() {
         method: "POST",
         cache: "no-store",
       });
-      const body = await response.json() as {
+      const body = await readJsonResponse<{
         items?: AnalysisApiItem[];
         sourceEmailCount?: number;
         uniqueCreatorCount?: number;
         deduplicatedCount?: number;
         baseError?: string | null;
         error?: string;
-      };
+      }>(response, "邮箱分析失败。");
       if (!response.ok) {
         throw new Error(body.error || "邮箱分析失败。");
       }
@@ -708,11 +780,11 @@ export default function Home() {
           confirmed: true,
         }),
       });
-      const result = await response.json() as {
+      const result = await readJsonResponse<{
         error?: string;
         scheduled?: boolean;
         sendAt?: number | null;
-      };
+      }>(response, "邮件操作失败。");
       if (!response.ok) throw new Error(result.error || "邮件操作失败。");
       setApproved(false);
       setEditing(false);
@@ -741,12 +813,12 @@ export default function Home() {
         `/api/mail/messages?limit=100&offset=${offset}&q=${encodeURIComponent(query)}`,
         { cache: "no-store" },
       );
-      const body = await response.json() as {
+      const body = await readJsonResponse<{
         items?: ImportedEmail[];
         total?: number;
         sync?: MailSync;
         error?: string;
-      };
+      }>(response, "邮件列表读取失败。");
       if (!response.ok) throw new Error(body.error || "邮件列表读取失败。");
       const items = body.items ?? [];
       const nextItems = append
@@ -773,6 +845,51 @@ export default function Home() {
       setMailError(error instanceof Error ? error.message : "邮件列表读取失败。");
     } finally {
       setMailLoading(false);
+    }
+  }
+
+  async function loadThread(email: string) {
+    if (!email) return;
+    setThreadLoading(true);
+    try {
+      const response = await fetch(`/api/mail/thread?email=${encodeURIComponent(email)}`, { cache: "no-store" });
+      const body = await readJsonResponse<{ items?: ImportedEmail[]; error?: string }>(response, "历史邮件读取失败。");
+      if (!response.ok) throw new Error(body.error || "历史邮件读取失败。");
+      setThreadEmails(body.items ?? []);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "历史邮件读取失败。");
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
+  async function changeMailDisposition(
+    messageIds: string[],
+    action: "archive" | "trash",
+    creatorName: string,
+    creatorEmail: string,
+  ) {
+    const verb = action === "archive" ? "归档" : "移到工作台垃圾箱";
+    const confirmed = window.confirm(
+      `${verb}“${creatorName}”的 ${messageIds.length} 封邮件？\n\n这只会将邮件从本网站的待处理列表移出，不会删除飞书邮箱原件。`,
+    );
+    if (!confirmed) return;
+    try {
+      const response = await fetch("/api/mail/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageIds, action, confirmed: true }),
+      });
+      const body = await readJsonResponse<{ affected?: number; error?: string }>(response, "邮件整理失败。");
+      if (!response.ok) throw new Error(body.error || "邮件整理失败。");
+      setImportedEmails((items) => items.filter((item) => !messageIds.includes(item.message_id)));
+      setCreators((items) => items.filter((item) => item.email.toLowerCase() !== creatorEmail.toLowerCase()));
+      setThreadEmails([]);
+      setSelectedMailId("");
+      setNotice(`已${verb} ${body.affected ?? messageIds.length} 封邮件；飞书邮箱原件未受影响。`);
+      if (view === "mail") await loadImportedMail(search, false);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "邮件整理失败。");
     }
   }
 
@@ -838,7 +955,7 @@ export default function Home() {
             full,
           }),
         });
-        const result = await response.json() as {
+        const result = await readJsonResponse<{
           imported?: number;
           total?: number;
           hasMore?: boolean;
@@ -849,7 +966,7 @@ export default function Home() {
           foldersCompleted?: number;
           checked?: number;
           error?: string;
-        };
+        }>(response, "邮件同步失败。");
         if (!response.ok) throw new Error(result.error || "邮件同步失败。");
         processed += result.imported ?? 0;
         checked += result.checked ?? 0;
@@ -917,10 +1034,6 @@ export default function Home() {
     view === "mail" ? "邮件线程与跟进判断" :
     view === "creators" ? "红人合作总览" :
     view === "messages" ? "达人建联话术中心" : "工作流与安全设置";
-  const selectedImported =
-    importedEmails.find((email) => email.message_id === selectedMailId) ??
-    importedEmails[0];
-
   return (
     <main className="shell">
       <aside className="sidebar">
@@ -976,15 +1089,16 @@ export default function Home() {
         {view === "dashboard" && (
           <>
             <section className="metrics">
-              <button onClick={() => setFilter("今日到期")}><span className="metricIcon red">!</span><div><strong>2</strong><p>今日必须处理</p></div><small>1项已逾期</small></button>
-              <button onClick={() => setFilter("需要跟进")}><span className="metricIcon amber">↗</span><div><strong>1</strong><p>3天未回复</p></div><small>需换角度跟进</small></button>
-              <button onClick={() => navigate("mail")}><span className="metricIcon blue">✉</span><div><strong>4</strong><p>待审核草稿</p></div><small>发送前需确认</small></button>
-              <button onClick={() => setFilter("终止候选")}><span className="metricIcon gray">⌛</span><div><strong>1</strong><p>终止候选</p></div><small>超过30天</small></button>
+              <button onClick={() => setFilter("今日到期")}><span className="metricIcon red">!</span><div><strong>{urgencyCounts["今日到期"] + urgencyCounts["阻塞"]}</strong><p>今日必须处理</p></div><small>包含阻塞与到期</small></button>
+              <button onClick={() => setFilter("需要跟进")}><span className="metricIcon amber">↗</span><div><strong>{urgencyCounts["需要跟进"]}</strong><p>3天未回复</p></div><small>需换角度跟进</small></button>
+              <button onClick={() => navigate("mail")}><span className="metricIcon blue">✉</span><div><strong>{creators.length}</strong><p>已分析邮箱</p></div><small>可生成个性化草稿</small></button>
+              <button onClick={() => setFilter("终止候选")}><span className="metricIcon gray">⌛</span><div><strong>{urgencyCounts["终止候选"]}</strong><p>终止候选</p></div><small>超过30天</small></button>
             </section>
             <Workspace
               visible={visible} selected={selected} filter={filter} search={search}
               drafts={drafts} draftHtmls={draftHtmls} approved={approved} editing={editing}
               deliveryMode={deliveryMode} scheduledAt={scheduledAt} sendingMail={sendingMail}
+              history={threadEmails} historyLoading={threadLoading}
               onFilter={setFilter} onSearch={setSearch} onChoose={chooseCreator}
               onApprove={setApproved} onEdit={setEditing}
               onDraft={(value) => {
@@ -1008,6 +1122,13 @@ export default function Home() {
                 setApproved(false);
               }}
               onExecute={requestExecution}
+              onDisposition={(action) => void changeMailDisposition(
+                threadEmails.map((email) => email.message_id),
+                action,
+                selected.name,
+                selected.email,
+              )}
+              onNotice={setNotice}
             />
           </>
         )}
@@ -1129,8 +1250,12 @@ export default function Home() {
               </div>
               {selectedImported ? (
                 <div className="panel threadPanel">
+                  <div className="mailAccountHeader">
+                    <span className="avatar">FZ</span>
+                    <div><b>当前邮件账户</b><strong>Felicia · 飞书邮箱</strong><small>{connected ? "已连接，可在本页预览与回复" : "未连接"}</small></div>
+                  </div>
                   <span className="categoryTag">
-                    {selectedImported.direction === "outbound" ? "已发送" : "收件箱"}
+                    {selectedMailCreator?.category ?? (selectedImported.direction === "outbound" ? "已发送" : "收件箱")}
                   </span>
                   <h2>{selectedImported.sender_name || selectedImported.sender_email || "未知发件人"}</h2>
                   <p className="threadSubject">{selectedImported.subject}</p>
@@ -1141,17 +1266,24 @@ export default function Home() {
                   <ImportedEmailBody
                     value={selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
                   />
+                  <ThreadHistory messages={threadEmails} loading={threadLoading} />
                   {selectedImported.direction === "inbound" && selectedImported.sender_email && (
                     <MailReplyComposer
                       key={selectedImported.message_id}
                       email={selectedImported}
                       connected={connected}
+                      creator={selectedMailCreator}
                       onNotice={setNotice}
                     />
                   )}
+                  <div className="mailDispositionTools">
+                    <b>人工判断无需处理？</b>
+                    <button type="button" onClick={() => void changeMailDisposition(threadEmails.map((email) => email.message_id), "archive", selectedImported.sender_name || selectedMailEmail, selectedMailEmail)}>归档线程</button>
+                    <button type="button" className="dangerGhost" onClick={() => void changeMailDisposition(threadEmails.map((email) => email.message_id), "trash", selectedImported.sender_name || selectedMailEmail, selectedMailEmail)}>移到工作台垃圾箱</button>
+                  </div>
                   <div className="threadDecision">
-                    <strong>下一步：识别红人并匹配合作记录</strong>
-                    <p>邮件已保存在网站中。自动判断和写回表格仍会遵守确认门槛。</p>
+                    <strong>飞书总表状态：{selectedMailCreator?.analysis?.tableStage ?? "待匹配"}</strong>
+                    <p>时间提醒：{selectedMailCreator?.urgency ?? "待分析"}。两者分开显示，合作状态以总表为准；邮件只生成建议和变更预览。</p>
                     <button onClick={() => navigate("dashboard")}>进入红人跟进工作台 →</button>
                   </div>
                 </div>
@@ -1201,6 +1333,8 @@ export default function Home() {
             <article><span className="settingIcon">30</span><div><h2>终止候选</h2><p>超过30天无回复只标记为候选，不会自动终止或发送收尾邮件。</p></div><strong>需人工确认</strong></article>
             <article><span className="settingIcon">✓</span><div><h2>执行确认门槛</h2><p>发送前展示最终邮件、匹配记录和每个字段的新旧值。</p></div><strong>强制开启</strong></article>
             <article><span className="settingIcon">日</span><div><h2>更新日期联动</h2><p>合作进度发生变化时，将“更新日期”同步设为当天；仅查看或进度未变时不更新。</p></div><strong>已启用</strong></article>
+            <article><span className="settingIcon">AI</span><div><h2>个性化智能回复</h2><p>同一邮箱的最新8封邮件、合作类型和飞书总表状态共同生成 Prompt；支持语气、情绪、字数和语言选择。</p></div><strong>只生成草稿</strong></article>
+            <article><span className="settingIcon">▣</span><div><h2>工作台归档</h2><p>人工判断无需处理时，可将整个邮件线程从待处理队列归档或移到工作台垃圾箱；不删除飞书原邮件。</p></div><strong>需确认</strong></article>
             <article className="transferSetting">
               <span className="settingIcon">→</span>
               <div>
@@ -1259,21 +1393,97 @@ export default function Home() {
   );
 }
 
+function ThreadHistory({ messages, loading }: { messages: ImportedEmail[]; loading: boolean }) {
+  return (
+    <details className="threadHistory" open>
+      <summary>历史邮件 <span>{loading ? "读取中…" : `${messages.length} 封`}</span></summary>
+      <div className="threadTimeline">
+        {messages.length ? messages.map((message) => (
+          <article key={message.message_id} className={message.direction === "outbound" ? "outbound" : "inbound"}>
+            <div><b>{message.direction === "outbound" ? "Felicia" : message.sender_name || message.sender_email || "红人"}</b><time>{formatMailDate(message.sent_at)}</time></div>
+            <strong>{message.subject}</strong>
+            <p>{(message.snippet || message.body_text || "无可显示内容").replace(/\s+/g, " ").slice(0, 420)}</p>
+          </article>
+        )) : <p className="emptyHistory">{loading ? "正在读取历史邮件…" : "暂无历史邮件。"}</p>}
+      </div>
+    </details>
+  );
+}
+
+function SmartReplyGenerator({
+  creatorName, creatorEmail, category, emailStage, tableStage, scenario,
+  onGenerated, onNotice,
+}: {
+  creatorName: string;
+  creatorEmail: string;
+  category: string;
+  emailStage: string;
+  tableStage?: string | null;
+  scenario: string;
+  onGenerated: (reply: string) => void;
+  onNotice: (value: string) => void;
+}) {
+  const [controls, setControls] = useState<ReplyControls>(defaultReplyControls);
+  const [generating, setGenerating] = useState(false);
+  const [prompt, setPrompt] = useState("");
+
+  async function generate() {
+    setGenerating(true);
+    onNotice("正在结合该红人的历史邮件和飞书总表状态生成回复…");
+    try {
+      const response = await fetch("/api/mail/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          creatorName, creatorEmail, category, emailStage, tableStage,
+          scenario, ...controls,
+        }),
+      });
+      const body = await readJsonResponse<{ reply?: string; prompt?: string; provider?: string; error?: string }>(response, "智能回复生成失败。");
+      if (!response.ok || !body.reply) throw new Error(body.error || "智能回复生成失败。");
+      setPrompt(body.prompt ?? "");
+      onGenerated(body.reply);
+      onNotice(body.provider === "fallback" ? "已生成安全回复草稿（AI 暂时不可用，已使用上下文规则）。" : "已根据该红人的历史邮件与飞书状态生成个性化回复。");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "智能回复生成失败。");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <section className="smartReplyBox">
+      <div className="replyControls">
+        <label>语气<select value={controls.tone} onChange={(event) => setControls({ ...controls, tone: event.target.value as ReplyControls["tone"] })}><option value="warm">温暖鼓励</option><option value="professional">专业自然</option><option value="friendly">轻松亲切</option><option value="firm">坚定推进</option></select></label>
+        <label>情绪<select value={controls.emotion} onChange={(event) => setControls({ ...controls, emotion: event.target.value as ReplyControls["emotion"] })}><option value="enthusiastic">高热情</option><option value="balanced">适度热情</option><option value="restrained">克制</option></select></label>
+        <label>字数<select value={controls.length} onChange={(event) => setControls({ ...controls, length: event.target.value as ReplyControls["length"] })}><option value="short">简短 60–90</option><option value="standard">标准 100–150</option><option value="detailed">详细 160–220</option></select></label>
+        <label>语言<select value={controls.language} onChange={(event) => setControls({ ...controls, language: event.target.value as ReplyControls["language"] })}><option>English</option><option>Spanish</option></select></label>
+      </div>
+      <button type="button" className="generateReply" onClick={() => void generate()} disabled={generating || !creatorEmail}>{generating ? "正在生成…" : "✦ 生成智能回复"}</button>
+      {prompt && <details className="promptPreview"><summary>查看本次内部 Prompt</summary><pre>{prompt}</pre></details>}
+    </section>
+  );
+}
+
 function Workspace({
   visible, selected, filter, search, drafts, draftHtmls, approved, editing,
   deliveryMode, scheduledAt, sendingMail,
+  history, historyLoading,
   onFilter, onSearch, onChoose, onApprove, onEdit, onDraft,
-  onDeliveryMode, onScheduledAt, onExecute,
+  onDeliveryMode, onScheduledAt, onExecute, onDisposition, onNotice,
 }: {
   visible: Creator[]; selected: Creator; filter: string; search: string;
   drafts: Record<number, string>; draftHtmls: Record<number, string>;
   approved: boolean; editing: boolean;
   deliveryMode: "now" | "schedule"; scheduledAt: string; sendingMail: boolean;
+  history: ImportedEmail[]; historyLoading: boolean;
   onFilter: (value: string) => void; onSearch: (value: string) => void;
   onChoose: (id: number) => void; onApprove: (value: boolean) => void;
   onEdit: (value: boolean) => void; onDraft: (value: string) => void;
   onDeliveryMode: (value: "now" | "schedule") => void;
   onScheduledAt: (value: string) => void; onExecute: () => void;
+  onDisposition: (action: "archive" | "trash") => void;
+  onNotice: (value: string) => void;
 }) {
   return (
     <section className="workspace">
@@ -1299,6 +1509,10 @@ function Workspace({
       <aside className="detail">
         <div className="detailTop"><div className="avatar large">{initials(selected.name)}</div><div><h2>{selected.name}</h2><p>{selected.handle} · {selected.email}</p></div><span className={`priorityPill p-${selected.urgency}`}>{selected.urgency}</span></div>
         <div className="route"><span>自动路由</span><strong>{selected.category}</strong><span className="confidence">{selected.analysis?.confidence ?? "高"}置信度</span></div>
+        <div className="statusSource">
+          <span><b>飞书总表状态</b>{selected.analysis?.tableStage ?? "未匹配"}</span>
+          <span><b>时间提醒</b>{selected.urgency} · {selected.silence}天</span>
+        </div>
         {selected.analysis && (
           <div className="analysisMeta">
             <span><b>{selected.analysis.messageCount}</b>封邮件</span>
@@ -1316,8 +1530,20 @@ function Workspace({
           </div>
         )}
         <div className="analysisBlock"><label>判断依据</label><p>{selected.latest}</p><label>建议下一步</label><p>{selected.next}</p></div>
+        <ThreadHistory messages={history} loading={historyLoading} />
         <div className="draftBlock">
           <div className="blockHead"><label>邮件回复预览</label><button onClick={() => onEdit(!editing)}>{editing ? "完成" : "编辑"}</button></div>
+          <SmartReplyGenerator
+            key={selected.id}
+            creatorName={selected.name}
+            creatorEmail={selected.email}
+            category={selected.category}
+            emailStage={selected.analysis?.emailStage ?? selected.stage}
+            tableStage={selected.analysis?.tableStage}
+            scenario={selected.analysis?.messageScenario ?? selected.next}
+            onGenerated={(reply) => { onDraft(plainTextToHtml(reply)); onEdit(true); }}
+            onNotice={onNotice}
+          />
           {editing ? (
             <RichTextEditor
               value={draftHtmls[selected.id] ?? plainTextToHtml(drafts[selected.id] ?? "")}
@@ -1380,6 +1606,11 @@ function Workspace({
               : "确认并立即发送"}
         </button>
         <p className="safetyNote">发送邮件会真实执行；飞书表格更新仍需单独确认</p>
+        <div className="noActionTools">
+          <span>人工判断无需处理</span>
+          <button type="button" onClick={() => onDisposition("archive")} disabled={!history.length}>归档线程</button>
+          <button type="button" className="dangerGhost" onClick={() => onDisposition("trash")} disabled={!history.length}>移到工作台垃圾箱</button>
+        </div>
       </aside>
     </section>
   );
@@ -1453,10 +1684,12 @@ function RichTextEditor({
 function MailReplyComposer({
   email,
   connected,
+  creator,
   onNotice,
 }: {
   email: ImportedEmail;
   connected: boolean;
+  creator?: Creator;
   onNotice: (value: string) => void;
 }) {
   const firstName = email.sender_name?.trim().split(/\s+/)[0] ?? "there";
@@ -1511,11 +1744,11 @@ function MailReplyComposer({
           confirmed: true,
         }),
       });
-      const result = await response.json() as {
+      const result = await readJsonResponse<{
         error?: string;
         scheduled?: boolean;
         sendAt?: number | null;
-      };
+      }>(response, "邮件操作失败。");
       if (!response.ok) throw new Error(result.error || "邮件操作失败。");
       setConfirmed(false);
       setOpen(false);
@@ -1546,6 +1779,16 @@ function MailReplyComposer({
         <button type="button" onClick={() => setOpen(false)}>收起</button>
       </div>
       <div className="replySubject"><b>主题</b><span>{subject}</span></div>
+      <SmartReplyGenerator
+        creatorName={creator?.name || email.sender_name || email.sender_email || "Creator"}
+        creatorEmail={email.sender_email || ""}
+        category={creator?.category || "未分类"}
+        emailStage={creator?.analysis?.emailStage || creator?.stage || "Needs review"}
+        tableStage={creator?.analysis?.tableStage}
+        scenario={creator?.analysis?.messageScenario || creator?.next || "Contextual reply"}
+        onGenerated={(reply) => { setHtml(plainTextToHtml(reply)); setConfirmed(false); }}
+        onNotice={onNotice}
+      />
       <RichTextEditor
         value={html}
         onChange={(value) => {

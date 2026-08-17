@@ -14,6 +14,9 @@
   "assets": {
     "directory": "./dist/client"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "d1_databases": [
     {
       "binding": "DB",

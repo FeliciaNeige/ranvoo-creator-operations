@@ -2,12 +2,16 @@ import {
   ensureMailTables,
   errorResponse,
   getMailDb,
+  MailApiError,
 } from "../_shared";
+import { ensureFeishuSession } from "../../auth/feishu/_shared";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
+    const auth = await ensureFeishuSession(request);
+    if (!auth) throw new MailApiError(401, "飞书授权已过期，请重新连接。");
     const db = getMailDb();
     await ensureMailTables(db);
     const url = new URL(request.url);
@@ -26,10 +30,12 @@ export async function GET(request: Request): Promise<Response> {
               message_id, thread_id, folder_id, folder_name, subject, sender_name, sender_email,
               recipients_json, sent_at, snippet, body_text, direction
             FROM email_messages
-            WHERE subject LIKE ? ESCAPE '\\'
-               OR sender_name LIKE ? ESCAPE '\\'
-               OR sender_email LIKE ? ESCAPE '\\'
-               OR body_text LIKE ? ESCAPE '\\'
+            WHERE review_status = 'active' AND (
+                 subject LIKE ? ESCAPE '\\'
+              OR sender_name LIKE ? ESCAPE '\\'
+              OR sender_email LIKE ? ESCAPE '\\'
+              OR body_text LIKE ? ESCAPE '\\'
+            )
             ORDER BY COALESCE(sent_at, imported_at) DESC
             LIMIT ? OFFSET ?
           `)
@@ -40,6 +46,7 @@ export async function GET(request: Request): Promise<Response> {
               message_id, thread_id, folder_id, folder_name, subject, sender_name, sender_email,
               recipients_json, sent_at, snippet, body_text, direction
             FROM email_messages
+            WHERE review_status = 'active'
             ORDER BY COALESCE(sent_at, imported_at) DESC
             LIMIT ? OFFSET ?
           `)
@@ -49,13 +56,15 @@ export async function GET(request: Request): Promise<Response> {
           .prepare(`
             SELECT COUNT(*) AS count
             FROM email_messages
-            WHERE subject LIKE ? ESCAPE '\\'
-               OR sender_name LIKE ? ESCAPE '\\'
-               OR sender_email LIKE ? ESCAPE '\\'
-               OR body_text LIKE ? ESCAPE '\\'
+            WHERE review_status = 'active' AND (
+                 subject LIKE ? ESCAPE '\\'
+              OR sender_name LIKE ? ESCAPE '\\'
+              OR sender_email LIKE ? ESCAPE '\\'
+              OR body_text LIKE ? ESCAPE '\\'
+            )
           `)
           .bind(pattern, pattern, pattern, pattern)
-      : db.prepare("SELECT COUNT(*) AS count FROM email_messages");
+      : db.prepare("SELECT COUNT(*) AS count FROM email_messages WHERE review_status = 'active'");
     const [messages, state, total] = await Promise.all([
       query.all(),
       db
@@ -65,6 +74,8 @@ export async function GET(request: Request): Promise<Response> {
         .first(),
       countQuery.first<{ count: number }>(),
     ]);
+    const headers = new Headers({ "Cache-Control": "no-store" });
+    if (auth.setCookie) headers.set("Set-Cookie", auth.setCookie);
     return Response.json(
       {
         items: messages.results.map((row) => ({
@@ -85,7 +96,7 @@ export async function GET(request: Request): Promise<Response> {
           page_token: null,
         },
       },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers },
     );
   } catch (error) {
     return errorResponse(error);

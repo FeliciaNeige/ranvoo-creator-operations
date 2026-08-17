@@ -82,7 +82,7 @@ export function errorResponse(error: unknown): Response {
     );
   }
   return Response.json(
-    { error: "同步邮件时发生了意外错误，请稍后重试。" },
+    { error: "邮件功能暂时发生了意外错误，请稍后重试。" },
     { status: 500 },
   );
 }
@@ -105,6 +105,8 @@ export async function ensureMailTables(db: D1Database): Promise<void> {
         body_html TEXT,
         labels_json TEXT NOT NULL DEFAULT '[]',
         direction TEXT NOT NULL DEFAULT 'unknown',
+        review_status TEXT NOT NULL DEFAULT 'active',
+        reviewed_at INTEGER,
         raw_json TEXT,
         imported_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -135,6 +137,8 @@ export async function ensureMailTables(db: D1Database): Promise<void> {
 
   await ensureColumns(db, "email_messages", [
     ["folder_name", "folder_name TEXT"],
+    ["review_status", "review_status TEXT NOT NULL DEFAULT 'active'"],
+    ["reviewed_at", "reviewed_at INTEGER"],
   ]);
   await ensureColumns(db, "mail_sync_state", [
     ["folder_index", "folder_index INTEGER NOT NULL DEFAULT 0"],
@@ -143,6 +147,11 @@ export async function ensureMailTables(db: D1Database): Promise<void> {
     ["folders_total", "folders_total INTEGER NOT NULL DEFAULT 0"],
     ["folders_completed", "folders_completed INTEGER NOT NULL DEFAULT 0"],
   ]);
+  await db
+    .prepare(
+      "CREATE INDEX IF NOT EXISTS email_messages_review_status_idx ON email_messages(review_status, sent_at DESC)",
+    )
+    .run();
 }
 
 async function ensureColumns(

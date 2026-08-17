@@ -31,6 +31,7 @@ export async function POST(request: Request): Promise<Response> {
           message_id, thread_id, subject, sender_name, sender_email,
           recipients_json, sent_at, snippet, body_text, direction
         FROM email_messages
+        WHERE review_status = 'active'
         ORDER BY COALESCE(sent_at, imported_at) ASC
         LIMIT 20000
       `)
