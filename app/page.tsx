@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
 type Category = "UGC" | "牙医合作" | "商业化红人" | "未分类";
@@ -105,6 +105,10 @@ type MailSync = {
   folders_total?: number;
   folders_completed?: number;
 };
+
+const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const AUTO_SYNC_LOCK_KEY = "ranvoo-mail-sync-lock";
+const AUTO_SYNC_LOCK_TTL_MS = 2 * 60 * 1000;
 
 const todayLabel = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -363,6 +367,10 @@ export default function Home() {
   const [syncingMail, setSyncingMail] = useState(false);
   const [syncProgress, setSyncProgress] = useState("");
   const [mailError, setMailError] = useState("");
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const syncAllMailRef = useRef<(forceFull?: boolean) => Promise<void>>(
+    async () => {},
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -383,6 +391,21 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const restorePreference = window.setTimeout(() => {
+      const saved = window.localStorage.getItem("ranvoo-auto-mail-sync");
+      if (saved !== null) setAutoSyncEnabled(saved === "true");
+    }, 0);
+    return () => window.clearTimeout(restorePreference);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "ranvoo-auto-mail-sync",
+      String(autoSyncEnabled),
+    );
+  }, [autoSyncEnabled]);
 
   useEffect(() => {
     if (view !== "mail" || !connected) return;
@@ -571,6 +594,40 @@ export default function Home() {
 
   async function syncAllMail(forceFull = false) {
     if (!connected || syncingMail) return;
+    const lockOwner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const readLock = () => {
+      try {
+        return JSON.parse(
+          window.localStorage.getItem(AUTO_SYNC_LOCK_KEY) ?? "null",
+        ) as { owner?: string; expiresAt?: number } | null;
+      } catch {
+        return null;
+      }
+    };
+    const activeLock = readLock();
+    if (
+      activeLock?.owner &&
+      activeLock.owner !== lockOwner &&
+      (activeLock.expiresAt ?? 0) > Date.now()
+    ) {
+      setSyncProgress("另一个已打开的工作台页面正在同步，请保持该页面打开。");
+      return;
+    }
+    const refreshLock = () => {
+      window.localStorage.setItem(
+        AUTO_SYNC_LOCK_KEY,
+        JSON.stringify({
+          owner: lockOwner,
+          expiresAt: Date.now() + AUTO_SYNC_LOCK_TTL_MS,
+        }),
+      );
+    };
+    refreshLock();
+    if (readLock()?.owner !== lockOwner) return;
+    const lockHeartbeat = window.setInterval(
+      refreshLock,
+      AUTO_SYNC_LOCK_TTL_MS / 2,
+    );
     setSyncingMail(true);
     setMailError("");
     let pageToken = !forceFull && mailSync.status === "running"
@@ -634,9 +691,36 @@ export default function Home() {
       setMailError(message);
       setSyncProgress("");
     } finally {
+      window.clearInterval(lockHeartbeat);
+      if (readLock()?.owner === lockOwner) {
+        window.localStorage.removeItem(AUTO_SYNC_LOCK_KEY);
+      }
       setSyncingMail(false);
     }
   }
+
+  useEffect(() => {
+    syncAllMailRef.current = syncAllMail;
+  });
+
+  useEffect(() => {
+    if (!connected || !autoSyncEnabled) return;
+
+    const checkForNewMail = () => {
+      if (document.visibilityState === "visible") {
+        void syncAllMailRef.current(false);
+      }
+    };
+    const initialCheck = window.setTimeout(checkForNewMail, 2000);
+    const interval = window.setInterval(
+      checkForNewMail,
+      AUTO_SYNC_INTERVAL_MS,
+    );
+    return () => {
+      window.clearTimeout(initialCheck);
+      window.clearInterval(interval);
+    };
+  }, [connected, autoSyncEnabled]);
 
   async function disconnectFeishu() {
     await fetch("/api/auth/feishu/disconnect", { method: "POST" });
@@ -747,6 +831,17 @@ export default function Home() {
               </div>
               {connected ? (
                 <div className="syncActions">
+                  <label className="autoSyncToggle">
+                    <input
+                      type="checkbox"
+                      checked={autoSyncEnabled}
+                      onChange={(event) => setAutoSyncEnabled(event.target.checked)}
+                    />
+                    <span>
+                      自动同步
+                      <b>每 10 分钟</b>
+                    </span>
+                  </label>
                   {mailSync.total_imported > 0 && !syncingMail && (
                     <button
                       className="secondaryAction"

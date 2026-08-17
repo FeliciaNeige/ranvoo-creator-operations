@@ -101,6 +101,10 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .mailSyncBar button { border: 0; border-radius: 8px; padding: 9px 12px; background: var(--green); color: white; cursor: pointer; font-size: 9px; font-weight: 700; }
 .mailSyncBar button:hover { background: var(--green-2); }
 .syncActions { display: flex; gap: 7px; align-items: center; }
+.autoSyncToggle { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid #bdd4c6; border-radius: 8px; background: white; color: #315f49; cursor: pointer; }
+.autoSyncToggle input { margin: 0; accent-color: var(--green); }
+.autoSyncToggle span { display: flex; flex-direction: column; gap: 1px; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.autoSyncToggle b { color: #87958d; font-size: 7px; font-weight: 500; }
 .mailSyncBar .secondaryAction { background: white; color: var(--green); border: 1px solid #bdd4c6; }
 .mailSyncBar .secondaryAction:hover { background: #f7fbf8; }
 .emptyMail { padding: 28px 18px; color: #7b847f; font-size: 10px; text-align: center; }
