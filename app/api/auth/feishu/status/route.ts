@@ -1,20 +1,14 @@
 import {
-  FeishuSession,
-  SESSION_COOKIE,
-  readCookie,
-  unseal,
+  ensureFeishuSession,
 } from "../_shared";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
-  const sessionValue = readCookie(request, SESSION_COOKIE);
-  const session = sessionValue
-    ? await unseal<FeishuSession>(sessionValue)
-    : null;
-  const connected = Boolean(
-    session?.accessToken && session.expiresAt > Date.now() + 30_000,
-  );
+  const auth = await ensureFeishuSession(request).catch(() => null);
+  const connected = Boolean(auth?.session.accessToken);
+  const headers = new Headers({ "Cache-Control": "no-store" });
+  if (auth?.setCookie) headers.set("Set-Cookie", auth.setCookie);
 
   return Response.json(
     {
@@ -25,8 +19,8 @@ export async function GET(request: Request): Promise<Response> {
           process.env.FEISHU_SESSION_SECRET,
       ),
       connected,
-      expiresAt: connected ? session?.expiresAt : null,
+      expiresAt: connected ? auth?.session.expiresAt : null,
     },
-    { headers: { "Cache-Control": "no-store" } },
+    { headers },
   );
 }

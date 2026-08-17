@@ -1,6 +1,6 @@
 import {
   MailApiError,
-  authorizedMailRequest,
+  createAuthorizedMailClient,
   errorResponse,
 } from "../_shared";
 import {
@@ -41,22 +41,20 @@ export async function POST(request: Request): Promise<Response> {
       throw new MailApiError(400, "定时发送时间至少需要晚于当前时间5分钟。");
     }
 
-    const profile = await authorizedMailRequest<FeishuRecord>(
-      request,
+    const mailClient = await createAuthorizedMailClient(request);
+    setCookie = mailClient.setCookie;
+    const profile = await mailClient.request<FeishuRecord>(
       "/mail/v1/user_mailboxes/me/profile",
     );
-    setCookie = profile.setCookie;
     const from = findEmail(profile.data);
     if (!from) throw new MailApiError(502, "无法读取当前飞书邮箱地址，请重新授权后再试。");
 
     let smtpMessageId = "";
     let references = "";
     if (body.sourceMessageId) {
-      const original = await authorizedMailRequest<FeishuRecord>(
-        request,
+      const original = await mailClient.request<FeishuRecord>(
         `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(body.sourceMessageId)}?format=plain_text_full`,
       );
-      setCookie ??= original.setCookie;
       const record = asRecord(original.data.message) ?? original.data;
       smtpMessageId = stringValue(record.smtp_message_id);
       references = Array.isArray(record.references)
@@ -74,24 +72,20 @@ export async function POST(request: Request): Promise<Response> {
       smtpMessageId,
       references,
     }));
-    const created = await authorizedMailRequest<FeishuRecord>(
-      request,
+    const created = await mailClient.request<FeishuRecord>(
       "/mail/v1/user_mailboxes/me/drafts",
       { method: "POST", body: { raw } },
     );
-    setCookie ??= created.setCookie;
     const draftId = stringValue(created.data.draft_id) || stringValue(asRecord(created.data.draft)?.draft_id);
     if (!draftId) throw new MailApiError(502, "飞书草稿已创建，但未返回草稿编号；为避免重复发送，操作已停止。");
 
-    const sent = await authorizedMailRequest<FeishuRecord>(
-      request,
+    const sent = await mailClient.request<FeishuRecord>(
       `/mail/v1/user_mailboxes/me/drafts/${encodeURIComponent(draftId)}/send`,
       {
         method: "POST",
         body: sendAt ? { send_time: String(Math.floor(sendAt / 1000)) } : {},
       },
     );
-    setCookie ??= sent.setCookie;
     const headers = new Headers({ "Cache-Control": "no-store" });
     if (setCookie) headers.set("Set-Cookie", setCookie);
     return Response.json(

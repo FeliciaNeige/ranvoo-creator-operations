@@ -18,41 +18,81 @@ export async function authorizedMailRequest<T>(
   data: T;
   setCookie?: string;
 }> {
+  const client = await createAuthorizedMailClient(request);
+  const result = await client.request<T>(path, init);
+  return { ...result, setCookie: client.setCookie };
+}
+
+export async function createAuthorizedMailClient(request: Request): Promise<{
+  setCookie?: string;
+  request<T>(
+    path: string,
+    init?: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown },
+  ): Promise<{ data: T }>;
+}> {
   const auth = await ensureFeishuSession(request);
   if (!auth) throw new MailApiError(401, "飞书授权已过期，请重新连接。");
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const response = await fetch(`${FEISHU_API_BASE}${path}`, {
-      method: init.method ?? "GET",
-      headers: {
-        Authorization: `Bearer ${auth.session.accessToken}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    });
-    const body = (await response.json()) as FeishuEnvelope<T>;
-    const rateLimited =
-      response.status === 429 ||
-      /frequency limit|rate limit|too many requests/i.test(body.msg ?? "");
-    if (rateLimited && attempt < 4) {
-      const retryAfter = Number(response.headers.get("Retry-After") ?? 0);
-      await delay(
-        retryAfter > 0
-          ? retryAfter * 1000
-          : Math.min(4000, 400 * 2 ** attempt),
-      );
-      continue;
-    }
-    if (!response.ok || (typeof body.code === "number" && body.code !== 0)) {
-      const message =
-        body.code === 1230002
-          ? "缺少所需的飞书邮箱权限，请发布新版应用后重新授权。"
-          : body.msg || "飞书邮箱暂时无法读取。";
-      throw new MailApiError(response.status || 502, message, body.code);
-    }
-    return { data: body.data as T, setCookie: auth.setCookie };
-  }
-  throw new MailApiError(429, "飞书请求频率过高，请稍后继续同步。");
+  return {
+    setCookie: auth.setCookie,
+    async request<T>(
+      path: string,
+      init: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown } = {},
+    ): Promise<{ data: T }> {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          const response = await fetch(`${FEISHU_API_BASE}${path}`, {
+            method: init.method ?? "GET",
+            headers: {
+              Authorization: `Bearer ${auth.session.accessToken}`,
+              "Content-Type": "application/json; charset=utf-8",
+            },
+            body: init.body === undefined ? undefined : JSON.stringify(init.body),
+            signal: AbortSignal.timeout(20_000),
+          });
+          const raw = await response.text();
+          let body: FeishuEnvelope<T> | null = null;
+          try {
+            body = raw ? JSON.parse(raw) as FeishuEnvelope<T> : null;
+          } catch {
+            body = null;
+          }
+          const rateLimited =
+            response.status === 429 ||
+            /frequency limit|rate limit|too many requests/i.test(body?.msg ?? "");
+          const transient = rateLimited || response.status >= 500 || !body;
+          if (transient && attempt < 4) {
+            const retryAfter = Number(response.headers.get("Retry-After") ?? 0);
+            await delay(
+              retryAfter > 0
+                ? retryAfter * 1000
+                : Math.min(5000, 500 * 2 ** attempt),
+            );
+            continue;
+          }
+          if (!body) {
+            throw new MailApiError(502, "飞书邮箱服务出现短暂波动，请稍后继续同步。");
+          }
+          if (!response.ok || (typeof body.code === "number" && body.code !== 0)) {
+            const message =
+              body.code === 1230002
+                ? "缺少所需的飞书邮箱权限，请发布新版应用后重新授权。"
+                : body.msg || "飞书邮箱暂时无法读取。";
+            throw new MailApiError(response.status || 502, message, body.code);
+          }
+          return { data: body.data as T };
+        } catch (error) {
+          if (error instanceof MailApiError) throw error;
+          if (attempt < 4) {
+            await delay(Math.min(5000, 500 * 2 ** attempt));
+            continue;
+          }
+          throw new MailApiError(502, "飞书邮箱连接暂时不稳定，请稍后继续同步。");
+        }
+      }
+      throw new MailApiError(429, "飞书请求频率过高，请稍后继续同步。");
+    },
+  };
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -87,7 +127,19 @@ export function errorResponse(error: unknown): Response {
   );
 }
 
+let mailTablesReady: Promise<void> | null = null;
+
 export async function ensureMailTables(db: D1Database): Promise<void> {
+  if (!mailTablesReady) {
+    mailTablesReady = initializeMailTables(db).catch((error) => {
+      mailTablesReady = null;
+      throw error;
+    });
+  }
+  return mailTablesReady;
+}
+
+async function initializeMailTables(db: D1Database): Promise<void> {
   await db.batch([
     db.prepare(`
       CREATE TABLE IF NOT EXISTS email_messages (

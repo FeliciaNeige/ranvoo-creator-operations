@@ -1,6 +1,6 @@
 import {
   MailApiError,
-  authorizedMailRequest,
+  createAuthorizedMailClient,
   ensureMailTables,
   errorResponse,
   getMailDb,
@@ -39,6 +39,8 @@ export async function POST(request: Request): Promise<Response> {
     };
     const db = getMailDb();
     await ensureMailTables(db);
+    const mailClient = await createAuthorizedMailClient(request);
+    setCookie = mailClient.setCookie;
 
     let pageToken = body.pageToken ?? "";
     let folderIndex = Math.max(0, body.folderIndex ?? 0);
@@ -52,11 +54,9 @@ export async function POST(request: Request): Promise<Response> {
       folderIndex = Math.max(0, state?.folder_index ?? 0);
     }
 
-    const folderResult = await authorizedMailRequest<FolderListData>(
-      request,
+    const folderResult = await mailClient.request<FolderListData>(
       "/mail/v1/user_mailboxes/me/folders",
     );
-    setCookie = folderResult.setCookie;
     const folders = (folderResult.data?.items ?? []).filter(
       (folder): folder is Folder =>
         Boolean(folder && typeof folder.id === "string" && folder.id),
@@ -74,16 +74,14 @@ export async function POST(request: Request): Promise<Response> {
     }
     const folder = folders[folderIndex];
     const query = new URLSearchParams({
-      page_size: "20",
+      page_size: "10",
       folder_id: folder.id,
     });
     if (pageToken) query.set("page_token", pageToken);
 
-    const listed = await authorizedMailRequest<MessageListData>(
-      request,
+    const listed = await mailClient.request<MessageListData>(
       `/mail/v1/user_mailboxes/me/messages?${query.toString()}`,
     );
-    setCookie ??= listed.setCookie;
     const ids = Array.isArray(listed.data?.items) ? listed.data.items : [];
 
     const existing = ids.length
@@ -102,14 +100,12 @@ export async function POST(request: Request): Promise<Response> {
 
     const messages = pageAlreadyKnown
       ? []
-      : await mapWithConcurrency(ids, 3, async (id) => {
-          const detail = await authorizedMailRequest<MessageData>(
-            request,
+      : await mapWithConcurrency(ids, 2, async (id) => {
+          const detail = await mailClient.request<MessageData>(
             `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}?format=plain_text_full`,
           );
-          setCookie ??= detail.setCookie;
           const normalized = normalizeMessage(id, detail.data, folder);
-          await delay(240);
+          await delay(160);
           return normalized;
         });
 

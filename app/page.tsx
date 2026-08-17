@@ -148,6 +148,19 @@ type MailSync = {
   folders_completed?: number;
 };
 
+type MailSyncBatchResult = {
+  imported?: number;
+  total?: number;
+  hasMore?: boolean;
+  pageToken?: string | null;
+  folderIndex?: number;
+  folderName?: string;
+  foldersTotal?: number;
+  foldersCompleted?: number;
+  checked?: number;
+  error?: string;
+};
+
 const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const AUTO_SYNC_LOCK_KEY = "ranvoo-mail-sync-lock";
 const AUTO_SYNC_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -527,6 +540,46 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
   }
 }
 
+async function requestMailSyncBatch(
+  payload: Record<string, unknown>,
+  onRetry: (attempt: number) => void,
+): Promise<MailSyncBatchResult> {
+  let lastError: Error = new Error("邮件同步失败。");
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const response = await fetch("/api/mail/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const result = await readJsonResponse<MailSyncBatchResult>(
+        response,
+        "邮件同步失败。",
+      );
+      if (response.ok) return result;
+      const error = new Error(result.error || "邮件同步失败。");
+      if (response.status !== 429 && response.status < 500) throw error;
+      lastError = error;
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error("邮件同步失败。");
+      if (!isTransientSyncError(normalized)) throw normalized;
+      lastError = normalized;
+    }
+    if (attempt < 3) {
+      onRetry(attempt + 1);
+      await new Promise((resolve) => window.setTimeout(resolve, 800 * 2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
+function isTransientSyncError(error: Error): boolean {
+  return /Cloudflare|临时|暂时|波动|无响应|超时|timeout|network|failed to fetch|fetch failed/i.test(
+    error.message,
+  ) || error.name === "TimeoutError" || error.name === "AbortError";
+}
+
 function counterpartyEmail(email: ImportedEmail): string {
   if (email.counterparty_email) return email.counterparty_email.toLowerCase();
   return email.direction === "inbound"
@@ -606,6 +659,7 @@ export default function Home() {
   const syncAllMailRef = useRef<(forceFull?: boolean) => Promise<void>>(
     async () => {},
   );
+  const syncRetryTimerRef = useRef<number | null>(null);
   const mailThreadPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1118,6 +1172,10 @@ export default function Home() {
 
   async function syncAllMail(forceFull = false) {
     if (!connected || syncingMail) return;
+    if (syncRetryTimerRef.current !== null) {
+      window.clearTimeout(syncRetryTimerRef.current);
+      syncRetryTimerRef.current = null;
+    }
     const lockOwner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const readLock = () => {
       try {
@@ -1169,28 +1227,16 @@ export default function Home() {
           !forceFull &&
           batch === 0 &&
           mailSync.status === "running";
-        const response = await fetch("/api/mail/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        const result = await requestMailSyncBatch(
+          {
             ...(resumeFromServer ? {} : { pageToken, folderIndex }),
             resume: resumeFromServer,
             full,
-          }),
-        });
-        const result = await readJsonResponse<{
-          imported?: number;
-          total?: number;
-          hasMore?: boolean;
-          pageToken?: string | null;
-          folderIndex?: number;
-          folderName?: string;
-          foldersTotal?: number;
-          foldersCompleted?: number;
-          checked?: number;
-          error?: string;
-        }>(response, "邮件同步失败。");
-        if (!response.ok) throw new Error(result.error || "邮件同步失败。");
+          },
+          (attempt) => setSyncProgress(
+            `连接短暂波动，正在自动重试（${attempt}/3），同步进度不会丢失…`,
+          ),
+        );
         processed += result.imported ?? 0;
         checked += result.checked ?? 0;
         setSyncProgress(
@@ -1212,8 +1258,18 @@ export default function Home() {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "邮件同步失败。";
-      setMailError(message);
-      setSyncProgress("");
+      if (error instanceof Error && isTransientSyncError(error) && autoSyncEnabled) {
+        setMailError("");
+        setSyncProgress("连接短暂波动，进度已保存，将在1分钟后自动继续同步。");
+        syncRetryTimerRef.current = window.setTimeout(() => {
+          syncRetryTimerRef.current = null;
+          void syncAllMailRef.current(false);
+        }, 60_000);
+      } else {
+        setMailError(message);
+        setSyncProgress("");
+        if (/授权已过期/.test(message)) setConnected(false);
+      }
     } finally {
       window.clearInterval(lockHeartbeat);
       if (readLock()?.owner === lockOwner) {
@@ -1226,6 +1282,12 @@ export default function Home() {
   useEffect(() => {
     syncAllMailRef.current = syncAllMail;
   });
+
+  useEffect(() => () => {
+    if (syncRetryTimerRef.current !== null) {
+      window.clearTimeout(syncRetryTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!connected || !autoSyncEnabled) return;

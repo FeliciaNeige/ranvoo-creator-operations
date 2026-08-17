@@ -63,3 +63,19 @@ test("bundles an installable Codex skill", async () => {
   assert.match(routing, /UGC collaboration/);
   assert.match(messages, /Commercial creator message library/);
 });
+
+test("mail sync retries transient failures and reuses one refreshed session", async () => {
+  const [page, shared, syncRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/mail/_shared.ts", root), "utf8"),
+    readFile(new URL("app/api/mail/sync/route.ts", root), "utf8"),
+  ]);
+
+  assert.match(page, /requestMailSyncBatch/);
+  assert.match(page, /正在自动重试/);
+  assert.match(page, /将在1分钟后自动继续同步/);
+  assert.match(shared, /createAuthorizedMailClient/);
+  assert.match(shared, /AbortSignal\.timeout\(20_000\)/);
+  assert.match(syncRoute, /const mailClient = await createAuthorizedMailClient\(request\)/);
+  assert.match(syncRoute, /page_size: "10"/);
+});
