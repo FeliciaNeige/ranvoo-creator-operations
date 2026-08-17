@@ -76,3 +76,24 @@ test("marks thirty days without a reply as a termination candidate", () => {
   assert.equal(result.stage, "Termination Candidate");
   assert.equal(result.urgency, "终止候选");
 });
+
+test("commercial subject wins over dental words quoted in the email body", () => {
+  const [result] = analyzeCreatorThreads(
+    [
+      {
+        messageId: "commercial-1",
+        subject: "Re: 💸💸💸【Collab Invitation】: Helping Moms Make Self-Care Easier 🤍",
+        senderName: "Tany",
+        senderEmail: "mom@example.com",
+        recipients: [{ email: "felicia@ranvoo.com" }],
+        sentAt: now,
+        bodyText: "As a mom, I care about dental health and may ask my dentist for advice.",
+        direction: "inbound",
+      },
+    ],
+    now,
+  );
+  assert.equal(result.category, "商业化红人");
+  assert.equal(result.categoryLabel, "商业化红人");
+  assert.equal(result.sourceTable, "牙刷红人👖");
+});

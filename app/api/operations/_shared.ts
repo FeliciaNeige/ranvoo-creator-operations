@@ -32,6 +32,17 @@ type RecordListData = {
   page_token?: string;
 };
 
+type FieldListData = {
+  items?: {
+    field_id: string;
+    field_name: string;
+    type: number;
+    ui_type?: string;
+  }[];
+  has_more?: boolean;
+  page_token?: string;
+};
+
 export type BaseMatch = {
   status: "matching" | "matched" | "unmatched" | "duplicate" | "unavailable";
   tableName: string | null;
@@ -70,26 +81,41 @@ export async function createFeishuClient(request: Request) {
       path: string,
       init: RequestInit = {},
     ): Promise<T> {
-      const response = await fetch(`${FEISHU_API_BASE}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${auth.session.accessToken}`,
-          "Content-Type": "application/json; charset=utf-8",
-          ...(init.headers ?? {}),
-        },
-      });
-      const body = (await response.json()) as FeishuEnvelope<T>;
-      if (
-        !response.ok ||
-        (typeof body.code === "number" && body.code !== 0)
-      ) {
-        throw new OperationsApiError(
-          response.status || 502,
-          body.msg || "飞书接口暂时不可用。",
-          body.code,
-        );
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const response = await fetch(`${FEISHU_API_BASE}${path}`, {
+          ...init,
+          headers: {
+            Authorization: `Bearer ${auth.session.accessToken}`,
+            "Content-Type": "application/json; charset=utf-8",
+            ...(init.headers ?? {}),
+          },
+        });
+        const text = await response.text();
+        let body: FeishuEnvelope<T>;
+        try {
+          body = JSON.parse(text) as FeishuEnvelope<T>;
+        } catch {
+          throw new OperationsApiError(
+            response.status || 502,
+            "飞书接口临时返回了异常页面，请稍后重试。",
+          );
+        }
+        const retryable = response.status === 429 ||
+          body.code === 1254290 || body.code === 1255040;
+        if (retryable && attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 350 * 2 ** attempt));
+          continue;
+        }
+        if (!response.ok || (typeof body.code === "number" && body.code !== 0)) {
+          throw new OperationsApiError(
+            response.status || 502,
+            body.msg || "飞书接口暂时不可用。",
+            body.code,
+          );
+        }
+        return body.data as T;
       }
-      return body.data as T;
+      throw new OperationsApiError(429, "飞书请求频率过高，请稍后重新分析。");
     },
   };
 }
@@ -121,7 +147,14 @@ export async function matchAnalysesToBase(
       if (!table) return;
       recordsByTable.set(tableName as string, {
         tableId: table.table_id,
-        records: await listAllRecords(client, appToken, table.table_id),
+        records: await searchRecordsForEmails(
+          client,
+          appToken,
+          table.table_id,
+          analyses
+            .filter((analysis) => analysis.sourceTable === tableName)
+            .map((analysis) => analysis.email),
+        ),
       });
     }),
   );
@@ -308,6 +341,78 @@ async function listAllRecords(
     );
     pageToken = page.has_more ? page.page_token ?? "" : "";
   } while (pageToken && items.length < 20_000);
+  return items;
+}
+
+async function searchRecordsForEmails(
+  client: Awaited<ReturnType<typeof createFeishuClient>>,
+  appToken: string,
+  tableId: string,
+  emails: string[],
+) {
+  if (!emails.length) return [];
+  const fields = await listAllFields(client, appToken, tableId);
+  const emailFields = fields.filter((field) =>
+    field.ui_type === "Email" ||
+    /email|e-mail|邮箱|邮件|联系|contact/i.test(field.field_name),
+  ).slice(0, 6);
+  if (!emailFields.length) {
+    return listAllRecords(client, appToken, tableId);
+  }
+
+  const records = new Map<string, { record_id: string; fields: Record<string, unknown> }>();
+  const uniqueEmails = [...new Set(emails.map((email) => email.toLowerCase()))];
+  const fieldsPerEmail = Math.max(1, emailFields.length);
+  const chunkSize = Math.max(1, Math.min(20, Math.floor(45 / fieldsPerEmail)));
+  for (let index = 0; index < uniqueEmails.length; index += chunkSize) {
+    const chunk = uniqueEmails.slice(index, index + chunkSize);
+    const conditions = chunk.flatMap((email) => emailFields.map((field) => ({
+      field_name: field.field_name,
+      operator: "contains",
+      value: [email],
+    })));
+    let pageToken = "";
+    do {
+      const query = new URLSearchParams({ page_size: "500" });
+      if (pageToken) query.set("page_token", pageToken);
+      const page = await client.request<RecordListData>(
+        `/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/records/search?${query.toString()}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            automatic_fields: true,
+            filter: { conjunction: "or", conditions },
+          }),
+        },
+      );
+      for (const item of page.items ?? []) {
+        records.set(item.record_id, {
+          record_id: item.record_id,
+          fields: item.fields ?? {},
+        });
+      }
+      pageToken = page.has_more ? page.page_token ?? "" : "";
+    } while (pageToken);
+  }
+  return [...records.values()];
+}
+
+async function listAllFields(
+  client: Awaited<ReturnType<typeof createFeishuClient>>,
+  appToken: string,
+  tableId: string,
+) {
+  const items: NonNullable<FieldListData["items"]> = [];
+  let pageToken = "";
+  do {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (pageToken) query.set("page_token", pageToken);
+    const page = await client.request<FieldListData>(
+      `/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/fields?${query.toString()}`,
+    );
+    items.push(...(page.items ?? []));
+    pageToken = page.has_more ? page.page_token ?? "" : "";
+  } while (pageToken);
   return items;
 }
 

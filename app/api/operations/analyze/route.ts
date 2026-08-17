@@ -1,4 +1,5 @@
 import { analyzeCreatorThreads, type AnalyzableEmail } from "../../../../lib/creator-analysis";
+import { loadRoutingConfig } from "../../../../lib/routing-settings";
 import { ensureMailTables, errorResponse, getMailDb } from "../../mail/_shared";
 import {
   OperationsApiError,
@@ -49,7 +50,8 @@ export async function POST(request: Request): Promise<Response> {
       bodyText: row.body_text,
       direction: row.direction,
     }));
-    const analyses = analyzeCreatorThreads(messages);
+    const routingConfig = await loadRoutingConfig(db);
+    const analyses = analyzeCreatorThreads(messages, Date.now(), routingConfig);
     const client = await createFeishuClient(request);
     if (phase === "email") {
       const headers = new Headers({ "Cache-Control": "no-store" });

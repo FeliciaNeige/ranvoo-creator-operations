@@ -1,3 +1,9 @@
+import {
+  defaultRoutingConfig,
+  type RoutingConfig,
+  type RoutingRule,
+} from "./routing-config.ts";
+
 export type CollaborationCategory =
   | "UGC"
   | "牙医合作"
@@ -28,6 +34,7 @@ export type CreatorThreadAnalysis = {
   email: string;
   creatorName: string;
   category: CollaborationCategory;
+  categoryLabel: string;
   sourceTable: string | null;
   targetTable: string | null;
   messageCount: number;
@@ -54,21 +61,16 @@ export type CreatorThreadAnalysis = {
   transferEligible: boolean;
 };
 
-const categoryRoutes: Record<
-  Exclude<CollaborationCategory, "未分类">,
-  { source: string; target: string }
-> = {
-  UGC: { source: "UGC👖", target: "UGC合作" },
-  牙医合作: { source: "专业人员👖", target: "🪥牙医合作" },
-  商业化红人: {
-    source: "牙刷红人👖",
-    target: "🪥合作红人（26年4月后",
-  },
+const targetTables: Record<Exclude<CollaborationCategory, "未分类">, string> = {
+  UGC: "UGC合作",
+  牙医合作: "🪥牙医合作",
+  商业化红人: "🪥合作红人（26年4月后",
 };
 
 export function analyzeCreatorThreads(
   messages: AnalyzableEmail[],
   now = Date.now(),
+  routingConfig: RoutingConfig = defaultRoutingConfig,
 ): CreatorThreadAnalysis[] {
   const groups = new Map<string, AnalyzableEmail[]>();
   for (const message of messages) {
@@ -80,7 +82,7 @@ export function analyzeCreatorThreads(
   }
 
   return [...groups.entries()]
-    .map(([email, group]) => analyzeGroup(email, group, now))
+    .map(([email, group]) => analyzeGroup(email, group, now, routingConfig))
     .sort((left, right) => {
       const urgencyOrder: Record<AnalysisUrgency, number> = {
         阻塞: 0,
@@ -100,6 +102,7 @@ function analyzeGroup(
   email: string,
   messages: AnalyzableEmail[],
   now: number,
+  routingConfig: RoutingConfig,
 ): CreatorThreadAnalysis {
   const ordered = [...messages].sort(
     (left, right) => (left.sentAt ?? 0) - (right.sentAt ?? 0),
@@ -109,8 +112,14 @@ function analyzeGroup(
   const outbound = ordered.filter((message) => message.direction === "outbound");
   const latestInbound = inbound[inbound.length - 1];
   const latestOutbound = outbound[outbound.length - 1];
-  const category = classifyCategory([...ordered].reverse());
-  const route = category === "未分类" ? null : categoryRoutes[category];
+  const category = classifyCategory([...ordered].reverse(), routingConfig.rules);
+  const matchedRule = category === "未分类"
+    ? null
+    : routingConfig.rules.find((rule) => rule.category === category) ?? null;
+  const sourceTable = category === "未分类"
+    ? null
+    : matchedRule?.sourceTable ?? null;
+  const targetTable = category === "未分类" ? null : targetTables[category];
   const lastInboundAt = latestInbound?.sentAt ?? null;
   const lastOutboundAt = latestOutbound?.sentAt ?? null;
   const waitingForCreator =
@@ -167,8 +176,9 @@ function analyzeGroup(
     email,
     creatorName,
     category,
-    sourceTable: route?.source ?? null,
-    targetTable: transferEligible ? route?.target ?? null : null,
+    categoryLabel: matchedRule?.label ?? "类型待确认",
+    sourceTable,
+    targetTable: transferEligible ? targetTable : null,
     messageCount: ordered.length,
     threadCount:
       new Set(ordered.map((message) => message.threadId).filter(Boolean)).size ||
@@ -235,34 +245,40 @@ function counterpartyEmail(message: AnalyzableEmail): string | null {
 
 function classifyCategory(
   messages: AnalyzableEmail[],
+  rules: RoutingRule[],
 ): CollaborationCategory {
+  // Precise subject routing always wins. Body keywords are only a fallback;
+  // this prevents a commercial mom creator mentioning dental health from
+  // being misclassified as a dental professional.
   for (const message of messages) {
     const subject = normalizeSubject(message.subject);
-    if (
-      subject.includes("paid ugc collab with ranvoo") ||
-      subject.includes("felicia from wlive") ||
-      /\bugc\b/.test(subject)
-    ) {
-      return "UGC";
+    for (const rule of rules) {
+      if (rule.subjectKeywords.some((keyword) => subject.includes(keyword))) {
+        return rule.category;
+      }
     }
-    if (
-      subject.includes("next-gen electric toothbrush") ||
-      /dentist|dental professional|clinic|牙医/.test(
-        `${subject} ${messageText(message).toLowerCase()}`,
-      )
-    ) {
-      return "牙医合作";
-    }
-    if (
-      subject.includes("paid instagram collab with ranvoo") ||
-      subject.includes("helping moms make self-care easier") ||
-      subject.includes("oral care experience during pregnancy") ||
-      subject.includes("empowering moms with better oral care")
-    ) {
-      return "商业化红人";
+  }
+  for (const message of messages) {
+    const text = `${normalizeSubject(message.subject)} ${messageText(message).toLowerCase()}`;
+    for (const rule of rules) {
+      if (rule.bodyKeywords.some((keyword) => containsKeyword(text, keyword))) {
+        return rule.category;
+      }
     }
   }
   return "未分类";
+}
+
+function containsKeyword(text: string, keyword: string): boolean {
+  if (!keyword) return false;
+  if (/^[a-z0-9]+$/i.test(keyword)) {
+    return new RegExp(`\\b${escapeRegExp(keyword)}\\b`, "i").test(text);
+  }
+  return text.includes(keyword);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function inferStage(

@@ -35,3 +35,9 @@ export const mailSyncState = sqliteTable("mail_sync_state", {
   status: text("status").notNull().default("idle"),
   lastError: text("last_error"),
 });
+
+export const routingSettings = sqliteTable("routing_settings", {
+  settingKey: text("setting_key").primaryKey(),
+  configJson: text("config_json").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

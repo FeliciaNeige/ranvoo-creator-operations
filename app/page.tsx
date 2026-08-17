@@ -6,6 +6,10 @@ import {
   plainTextToHtml,
   sanitizeMailHtml,
 } from "../lib/mail-compose";
+import {
+  defaultRoutingConfig,
+  type RoutingConfig,
+} from "../lib/routing-config";
 
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
 type Category = "UGC" | "牙医合作" | "商业化红人" | "未分类";
@@ -17,6 +21,7 @@ type Creator = {
   handle: string;
   email: string;
   category: Category;
+  categoryLabel?: string;
   subject: string;
   stage: string;
   silence: number;
@@ -61,6 +66,7 @@ type AnalysisApiItem = {
   email: string;
   creatorName: string;
   category: Category;
+  categoryLabel: string;
   sourceTable: string | null;
   targetTable: string | null;
   messageCount: number;
@@ -463,6 +469,7 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
     handle: "待从多维表匹配",
     email: item.email,
     category: item.category,
+    categoryLabel: item.categoryLabel,
     subject: item.latestSubject,
     stage: tableStage ?? item.stage,
     silence: item.silenceDays,
@@ -528,16 +535,19 @@ function counterpartyEmail(email: ImportedEmail): string {
 }
 
 function tableStageLabel(creator?: Creator): string {
-  if (!creator?.analysis || creator.analysis.tableStatus === "matching") return "总表匹配中…";
+  if (!creator?.analysis) return "总表匹配中…";
+  if (creator.category === "未分类") return "待确认类型";
+  if (creator.analysis.tableStatus === "matching") return "总表匹配中…";
   if (creator.analysis.tableStatus === "matched") {
     return creator.analysis.tableStage || "总表状态为空";
   }
   if (creator.analysis.tableStatus === "unmatched") return "总表未匹配";
   if (creator.analysis.tableStatus === "duplicate") return "总表重复记录";
-  return "总表待连接";
+  return "总表读取失败";
 }
 
-function creatorTypeLabel(category?: Category): string {
+function creatorTypeLabel(category?: Category, customLabel?: string): string {
+  if (customLabel?.trim()) return customLabel;
   if (category === "UGC") return "UGC 红人";
   if (category === "牙医合作") return "牙医 / 专业人员";
   if (category === "商业化红人") return "商业化红人";
@@ -573,6 +583,11 @@ export default function Home() {
   const [newCategory, setNewCategory] = useState<Category>("UGC");
   const [reanalyzing, setReanalyzing] = useState(false);
   const [analysisLoaded, setAnalysisLoaded] = useState(false);
+  const [routingConfig, setRoutingConfig] = useState<RoutingConfig>(() =>
+    structuredClone(defaultRoutingConfig),
+  );
+  const [routingLoaded, setRoutingLoaded] = useState(false);
+  const [routingSaving, setRoutingSaving] = useState(false);
   const [importedEmails, setImportedEmails] = useState<ImportedEmail[]>([]);
   const [mailSync, setMailSync] = useState<MailSync>({
     total_imported: 0,
@@ -644,6 +659,11 @@ export default function Home() {
     // 今日工作台与邮件页首次进入时自动加载分类和飞书总表标签。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, connected, analysisLoaded, reanalyzing]);
+
+  useEffect(() => {
+    if (view !== "settings" || !connected || routingLoaded) return;
+    void loadRoutingSettings();
+  }, [view, connected, routingLoaded]);
 
   const visible = useMemo(
     () => creators.filter((creator) =>
@@ -795,6 +815,63 @@ export default function Home() {
       setNotice(error instanceof Error ? error.message : "邮箱分析失败。");
     } finally {
       setReanalyzing(false);
+    }
+  }
+
+  async function loadRoutingSettings() {
+    try {
+      const response = await fetch("/api/settings/routing", { cache: "no-store" });
+      const body = await readJsonResponse<{ config?: RoutingConfig; error?: string }>(
+        response,
+        "分类规则读取失败。",
+      );
+      if (!response.ok) throw new Error(body.error || "分类规则读取失败。");
+      if (body.config) setRoutingConfig(body.config);
+      setRoutingLoaded(true);
+    } catch (error) {
+      setRoutingLoaded(true);
+      setNotice(error instanceof Error ? error.message : "分类规则读取失败。");
+    }
+  }
+
+  function updateRoutingRule(
+    index: number,
+    field: "label" | "sourceTable" | "subjectKeywords" | "bodyKeywords",
+    value: string,
+  ) {
+    setRoutingConfig((current) => ({
+      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index
+        ? {
+            ...rule,
+            [field]: field.endsWith("Keywords")
+              ? value.split("\n").map((item) => item.trim()).filter(Boolean)
+              : value,
+          }
+        : rule),
+    }));
+  }
+
+  async function saveRoutingSettings() {
+    setRoutingSaving(true);
+    setNotice("正在保存分类规则…");
+    try {
+      const response = await fetch("/api/settings/routing", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: routingConfig }),
+      });
+      const body = await readJsonResponse<{ config?: RoutingConfig; error?: string }>(
+        response,
+        "分类规则保存失败。",
+      );
+      if (!response.ok) throw new Error(body.error || "分类规则保存失败。");
+      if (body.config) setRoutingConfig(body.config);
+      setAnalysisLoaded(false);
+      setNotice("分类规则已保存。返回今日工作台或邮件线程后会自动按新规则重新分析。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "分类规则保存失败。");
+    } finally {
+      setRoutingSaving(false);
     }
   }
 
@@ -1374,7 +1451,7 @@ export default function Home() {
                             <small>{formatMailDate(email.sent_at)} · 同邮箱 {email.message_count ?? 1} 封</small>
                           </span>
                           <span className="mailTagStack">
-                            <em className={`creatorTypeTag type-${creator?.category ?? "未分类"}`}>{creatorTypeLabel(creator?.category)}</em>
+                            <em className={`creatorTypeTag type-${creator?.category ?? "未分类"}`}>{creatorTypeLabel(creator?.category, creator?.categoryLabel)}</em>
                             <em className={`mailStageTag status-${creator?.analysis?.tableStatus ?? "matching"}`}>{tableStageLabel(creator)}</em>
                           </span>
                         </button>
@@ -1411,7 +1488,7 @@ export default function Home() {
                   </div>
                   <div className="threadBadges">
                     <span className={`categoryTag type-${selectedMailCreator?.category ?? "未分类"}`}>
-                      {creatorTypeLabel(selectedMailCreator?.category)}
+                      {creatorTypeLabel(selectedMailCreator?.category, selectedMailCreator?.categoryLabel)}
                     </span>
                     <span className={`categoryTag stageTag status-${selectedMailCreator?.analysis?.tableStatus ?? "matching"}`}>
                       {tableStageLabel(selectedMailCreator)}
@@ -1493,6 +1570,43 @@ export default function Home() {
 
         {view === "settings" && (
           <section className="settingsGrid">
+            <section className="routingSettingsPanel">
+              <div className="routingSettingsHead">
+                <div>
+                  <span className="settingIcon">类</span>
+                  <div>
+                    <h2>红人类型与总表路由参数</h2>
+                    <p>标题关键词优先于正文关键词。每行填写一个关键词；保存后会重新分析全部邮箱。</p>
+                  </div>
+                </div>
+                <div className="routingActions">
+                  <button type="button" onClick={() => setRoutingConfig(structuredClone(defaultRoutingConfig))}>恢复默认</button>
+                  <button type="button" className="primary" disabled={!connected || routingSaving} onClick={() => void saveRoutingSettings()}>
+                    {routingSaving ? "保存中…" : "保存并重新分析"}
+                  </button>
+                </div>
+              </div>
+              <div className="routingRuleGrid">
+                {routingConfig.rules.map((rule, index) => (
+                  <article className="routingRuleCard" key={rule.category}>
+                    <strong>{rule.category}</strong>
+                    <label>网页显示名称
+                      <input value={rule.label} onChange={(event) => updateRoutingRule(index, "label", event.target.value)} />
+                    </label>
+                    <label>对应来源表名称
+                      <input value={rule.sourceTable} onChange={(event) => updateRoutingRule(index, "sourceTable", event.target.value)} />
+                    </label>
+                    <label>邮件标题关键词（优先）
+                      <textarea value={rule.subjectKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "subjectKeywords", event.target.value)} />
+                    </label>
+                    <label>正文/职业关键词（兜底）
+                      <textarea value={rule.bodyKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "bodyKeywords", event.target.value)} />
+                    </label>
+                  </article>
+                ))}
+              </div>
+              <p className="routingHelp">新增一种称呼或红人细分类型时，可修改“网页显示名称”并添加对应关键词；如果未来需要全新的第四条合作流程，再单独新增主流程，避免误写现有三张表。</p>
+            </section>
             <article><span className="settingIcon">3</span><div><h2>跟进提醒</h2><p>最后一封发出邮件满3个完整自然日且无回复时进入“需要跟进”。</p></div><strong>已启用</strong></article>
             <article><span className="settingIcon">30</span><div><h2>终止候选</h2><p>超过30天无回复只标记为候选，不会自动终止或发送收尾邮件。</p></div><strong>需人工确认</strong></article>
             <article><span className="settingIcon">✓</span><div><h2>执行确认门槛</h2><p>发送前展示最终邮件、匹配记录和每个字段的新旧值。</p></div><strong>强制开启</strong></article>
@@ -1666,7 +1780,7 @@ function Workspace({
               <div className="taskMain">
                 <div className="taskTitle"><strong>{creator.name}</strong></div>
                 <div className="taskBadges">
-                  <span className={`creatorTypeTag type-${creator.category}`}>{creatorTypeLabel(creator.category)}</span>
+                  <span className={`creatorTypeTag type-${creator.category}`}>{creatorTypeLabel(creator.category, creator.categoryLabel)}</span>
                   <span className={`creatorProgressTag status-${creator.analysis?.tableStatus ?? "matching"}`}>{tableStageLabel(creator)}</span>
                 </div>
                 <p>{creator.subject}</p>
@@ -1680,7 +1794,7 @@ function Workspace({
 
       <aside className="detail">
         <div className="detailTop"><div className="avatar large">{initials(selected.name)}</div><div><h2>{selected.name}</h2><p>{selected.handle} · {selected.email}</p></div><span className={`priorityPill p-${selected.urgency}`}>{selected.urgency}</span></div>
-        <div className="route"><span>合作类型</span><strong>{creatorTypeLabel(selected.category)}</strong><span className="confidence">{selected.analysis?.confidence ?? "高"}置信度</span></div>
+        <div className="route"><span>合作类型</span><strong>{creatorTypeLabel(selected.category, selected.categoryLabel)}</strong><span className="confidence">{selected.analysis?.confidence ?? "高"}置信度</span></div>
         <div className="statusSource">
           <span className={`status-${selected.analysis?.tableStatus ?? "matching"}`}><b>飞书总表状态</b>{tableStageLabel(selected)}</span>
           <span><b>时间提醒</b>{selected.urgency} · {selected.silence}天</span>
