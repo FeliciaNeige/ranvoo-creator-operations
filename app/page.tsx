@@ -1141,6 +1141,14 @@ export default function Home() {
                   <ImportedEmailBody
                     value={selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
                   />
+                  {selectedImported.direction === "inbound" && selectedImported.sender_email && (
+                    <MailReplyComposer
+                      key={selectedImported.message_id}
+                      email={selectedImported}
+                      connected={connected}
+                      onNotice={setNotice}
+                    />
+                  )}
                   <div className="threadDecision">
                     <strong>下一步：识别红人并匹配合作记录</strong>
                     <p>邮件已保存在网站中。自动判断和写回表格仍会遵守确认门槛。</p>
@@ -1439,5 +1447,131 @@ function RichTextEditor({
         aria-label="邮件正文编辑器"
       />
     </div>
+  );
+}
+
+function MailReplyComposer({
+  email,
+  connected,
+  onNotice,
+}: {
+  email: ImportedEmail;
+  connected: boolean;
+  onNotice: (value: string) => void;
+}) {
+  const firstName = email.sender_name?.trim().split(/\s+/)[0] ?? "there";
+  const [open, setOpen] = useState(false);
+  const [html, setHtml] = useState(
+    `<p>Hi ${firstName},</p><p><br></p><p>Best,<br>Felicia</p>`,
+  );
+  const [mode, setMode] = useState<"now" | "schedule">("now");
+  const [sendAtInput, setSendAtInput] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const subject = /^\s*re:/i.test(email.subject)
+    ? email.subject
+    : `Re: ${email.subject}`;
+
+  async function sendReply() {
+    if (!connected) {
+      onNotice("请先连接飞书，再发送邮件。");
+      return;
+    }
+    if (!confirmed) {
+      onNotice("请先核对收件人、主题、正文和发送时间并勾选确认。");
+      return;
+    }
+    const cleanHtml = sanitizeMailHtml(html);
+    const plainText = htmlToPlainText(cleanHtml);
+    if (!plainText) {
+      onNotice("邮件正文不能为空。");
+      return;
+    }
+    let sendAt: number | undefined;
+    if (mode === "schedule") {
+      sendAt = shanghaiInputToTimestamp(sendAtInput);
+      if (!sendAt || sendAt < Date.now() + 5 * 60_000) {
+        onNotice("请选择至少晚于当前时间5分钟的定时发送时间。");
+        return;
+      }
+    }
+    setSubmitting(true);
+    onNotice(mode === "schedule" ? "正在提交定时回复…" : "正在发送回复…");
+    try {
+      const response = await fetch("/api/mail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: email.sender_email,
+          subject,
+          html: cleanHtml,
+          plainText,
+          sourceMessageId: email.message_id,
+          sendAt,
+          confirmed: true,
+        }),
+      });
+      const result = await response.json() as {
+        error?: string;
+        scheduled?: boolean;
+        sendAt?: number | null;
+      };
+      if (!response.ok) throw new Error(result.error || "邮件操作失败。");
+      setConfirmed(false);
+      setOpen(false);
+      onNotice(
+        result.scheduled && result.sendAt
+          ? `定时回复已提交，将于 ${formatScheduledDate(result.sendAt)} 发送。可在飞书邮箱“定时发送”文件夹中管理。`
+          : "回复已发送，请在飞书发件箱确认发送结果。",
+      );
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "邮件操作失败。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="openReplyComposer" type="button" onClick={() => setOpen(true)}>
+        ↩ 回复这封邮件
+      </button>
+    );
+  }
+
+  return (
+    <section className="mailReplyComposer">
+      <div className="replyComposerHead">
+        <div><strong>回复邮件</strong><small>收件人：{email.sender_email}</small></div>
+        <button type="button" onClick={() => setOpen(false)}>收起</button>
+      </div>
+      <div className="replySubject"><b>主题</b><span>{subject}</span></div>
+      <RichTextEditor
+        value={html}
+        onChange={(value) => {
+          setHtml(value);
+          setConfirmed(false);
+        }}
+      />
+      <div className="deliveryBlock compactDelivery">
+        <div className="deliveryChoices">
+          <button type="button" className={mode === "now" ? "selected" : ""} onClick={() => { setMode("now"); setConfirmed(false); }}>立即发送</button>
+          <button type="button" className={mode === "schedule" ? "selected" : ""} onClick={() => { setMode("schedule"); setSendAtInput((current) => current || defaultScheduledInput()); setConfirmed(false); }}>定时发送</button>
+        </div>
+        {mode === "schedule" && (
+          <div className="schedulePicker">
+            <input type="datetime-local" value={sendAtInput} min={minimumScheduledInput()} onChange={(event) => { setSendAtInput(event.target.value); setConfirmed(false); }} />
+            <small>北京时间，至少提前5分钟。</small>
+          </div>
+        )}
+      </div>
+      <label className="confirm replyConfirm">
+        <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+        <span>我已核对收件人、主题、正文和发送时间</span>
+      </label>
+      <button className="execute" type="button" disabled={submitting} onClick={() => void sendReply()}>
+        {submitting ? "正在提交…" : mode === "schedule" ? "确认并定时发送" : "确认并立即发送"}
+      </button>
+    </section>
   );
 }
