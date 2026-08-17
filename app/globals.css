@@ -82,7 +82,7 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .creatorProgressTag, .status-matched { color: #326448!important; background: #e2f0e7!important; }.status-matching { color: #7e6629!important; background: #fff2ce!important; }.status-unmatched, .status-unavailable { color: #9a4d45!important; background: #fae9e6!important; }.status-duplicate { color: #8857a1!important; background: #f2e8f7!important; }
 .taskMain p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 6px 0 4px; color: #65716b; font-size: 10px; }.taskMain small { color: #98a29d; font-size: 9px; }.chevron { color: #9ba49f; font-size: 19px; }
 .emptyState { padding: 44px 20px; text-align: center; color: #75817b; }.emptyState p { margin: 6px 0 0; font-size: 10px; }
-.detail { padding: 21px; position: sticky; top: 24px; }
+.detail { padding: 21px; position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .detailTop { display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; align-items: center; padding-bottom: 17px; border-bottom: 1px solid var(--line); position: relative; }
 .avatar.large { width: 48px; height: 48px; border-radius: 12px; }.detailTop p { margin: 5px 0 0; color: #839089; font-size: 9px; }.detailTop .priorityPill { position: static; }
 .route { display: flex; align-items: center; gap: 8px; padding: 13px 0; border-bottom: 1px solid var(--line); font-size: 9px; color: #89948e; }.route strong { color: #2c5742; background: #e5f0ea; padding: 5px 8px; border-radius: 6px; }.confidence { margin-left: auto; color: #458264; }
@@ -170,9 +170,12 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .openReplyComposer:hover { background: #deece4; }
 .threadHistory { margin: 15px 0; border: 1px solid #dce6e0; border-radius: 10px; background: white; overflow: hidden; }
 .threadHistory > summary { display: flex; justify-content: space-between; padding: 11px 12px; background: #f3f7f5; color: #355d49; cursor: pointer; font-size: 9px; font-weight: 700; }.threadHistory > summary span { color: #849089; font-weight: 500; }
-.threadTimeline { display: grid; gap: 8px; max-height: 330px; overflow: auto; padding: 10px; }
-.threadTimeline article { max-width: 92%; border-radius: 9px; padding: 9px 10px; background: #f2f5f3; }.threadTimeline article.outbound { justify-self: end; background: #e7f1ec; }
-.threadTimeline article > div { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; }.threadTimeline article b { color: #345947; font-size: 8px; }.threadTimeline time { color: #929c97; font-size: 7px; }.threadTimeline article strong { display: block; color: #4a5a51; font-size: 8px; }.threadTimeline article p { margin: 4px 0 0; color: #647169; font-size: 8px; line-height: 1.5; }.emptyHistory { margin: 8px; text-align: center; color: #87928c; font-size: 9px; }
+.threadTimeline { display: grid; gap: 8px; padding: 10px; }
+.historyMessage { width: 92%; border-radius: 9px; background: #f2f5f3; overflow: hidden; }.historyMessage.outbound { justify-self: end; background: #e7f1ec; }
+.historyMessage > summary { display: flex; flex-direction: column; gap: 4px; padding: 9px 10px; cursor: pointer; list-style: none; }.historyMessage > summary::-webkit-details-marker { display: none; }
+.historyMessageMeta { display: flex; justify-content: space-between; gap: 10px; }.historyMessageMeta b { color: #345947; font-size: 8px; }.historyMessage time { color: #929c97; font-size: 7px; }.historyMessage strong { display: block; color: #4a5a51; font-size: 8px; }.historyPreview { color: #647169; font-size: 8px; line-height: 1.5; }.historyExpand { width: fit-content; margin-top: 2px; color: #2f6a4e; font-size: 8px; font-weight: 700; }.historyMessage[open] .historyExpand { font-size: 0; }.historyMessage[open] .historyExpand::after { content: "收起完整正文"; font-size: 8px; }
+.historyFullBody { padding: 0 10px 10px; }.historyFullBody .importedBody { min-height: 0; max-height: none; overflow: visible; padding: 12px; background: rgba(255,255,255,.72); }.historyFullBody .emailLatest { max-width: none; font-size: 9px; line-height: 1.7; }.historyFullBody .emailHistory { font-size: 8px; }
+.emptyHistory { margin: 8px; text-align: center; color: #87928c; font-size: 9px; }
 .smartReplyBox { margin: 8px 0 10px; padding: 10px; border: 1px solid #d4e4da; border-radius: 10px; background: #f4f8f6; }
 .replyControls { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }.replyControls label { display: flex; flex-direction: column; gap: 4px; color: #75837b; font-size: 7px; font-weight: 700; }.replyControls select { min-width: 0; width: 100%; border: 1px solid #d5e1da; border-radius: 6px; padding: 6px 5px; background: white; color: #405349; font-size: 8px; }
 .generateReply { width: 100%; margin-top: 8px; border: 0; border-radius: 7px; padding: 8px; background: #356d50; color: white; cursor: pointer; font-size: 9px; font-weight: 700; }.generateReply:disabled { opacity: .6; cursor: wait; }
@@ -200,7 +203,7 @@ button.tableRow { cursor: pointer; }.tableRow:not(.tableHeader):hover { backgrou
 
 @media (max-width: 1050px) {
   .shell { grid-template-columns: 78px 1fr; }.sidebar { padding-inline: 11px; }.brandWords, .navItem { font-size: 0; }.brand { padding-inline: 8px; }.navItem { justify-content: center; }.navItem span { font-size: 15px; }.syncCard div, .connectButton, .profile div { display: none; }.profile { justify-content: center; }
-  .content { padding: 30px 24px; }.workspace, .pageGrid { grid-template-columns: 1fr; }.mailWorkspaceGrid { height: auto; min-height: 0; overflow: visible; }.mailListPanel, .mailWorkspaceGrid .threadPanel { max-height: 680px; }.detail { position: static; }.metrics { grid-template-columns: repeat(2,1fr); }.routingRuleGrid { grid-template-columns: 1fr; }
+  .content { padding: 30px 24px; }.workspace, .pageGrid { grid-template-columns: 1fr; }.mailWorkspaceGrid { height: auto; min-height: 0; overflow: visible; }.mailListPanel, .mailWorkspaceGrid .threadPanel { max-height: 680px; }.detail { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; }.metrics { grid-template-columns: repeat(2,1fr); }.routingRuleGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 680px) {
   .shell { display: block; }.sidebar { position: sticky; width: 100%; height: auto; padding: 10px 14px; flex-direction: row; align-items: center; }.brand { padding: 0; }.brandMark { width: 34px; height: 34px; }.sidebar nav { flex-direction: row; margin-left: auto; gap: 2px; }.navItem { padding: 8px; }.sideBottom { display: none; }

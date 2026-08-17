@@ -1738,13 +1738,32 @@ function ThreadHistory({ messages, loading }: { messages: ImportedEmail[]; loadi
     <details className="threadHistory" open>
       <summary>历史邮件 <span>{loading ? "读取中…" : `${messages.length} 封`}</span></summary>
       <div className="threadTimeline">
-        {messages.length ? messages.map((message) => (
-          <article key={message.message_id} className={message.direction === "outbound" ? "outbound" : "inbound"}>
-            <div><b>{message.direction === "outbound" ? "Felicia" : message.sender_name || message.sender_email || "红人"}</b><time>{formatMailDate(message.sent_at)}</time></div>
-            <strong>{message.subject}</strong>
-            <p>{(message.snippet || message.body_text || "无可显示内容").replace(/\s+/g, " ").slice(0, 420)}</p>
-          </article>
-        )) : <p className="emptyHistory">{loading ? "正在读取历史邮件…" : "暂无历史邮件。"}</p>}
+        {messages.length ? messages.map((message) => {
+          const fullBody = message.body_text || message.snippet || "无可显示内容";
+          const compact = (message.snippet || fullBody).replace(/\s+/g, " ").trim();
+          const preview = compact.length > 220
+            ? `${compact.slice(0, 220).trimEnd()}…`
+            : compact;
+          return (
+            <details
+              key={message.message_id}
+              className={`historyMessage ${message.direction === "outbound" ? "outbound" : "inbound"}`}
+            >
+              <summary>
+                <span className="historyMessageMeta">
+                  <b>{message.direction === "outbound" ? "Felicia" : message.sender_name || message.sender_email || "红人"}</b>
+                  <time>{formatMailDate(message.sent_at)}</time>
+                </span>
+                <strong>{message.subject}</strong>
+                <span className="historyPreview">{preview}</span>
+                <span className="historyExpand">展开完整正文</span>
+              </summary>
+              <div className="historyFullBody">
+                <ImportedEmailBody value={fullBody} />
+              </div>
+            </details>
+          );
+        }) : <p className="emptyHistory">{loading ? "正在读取历史邮件…" : "暂无历史邮件。"}</p>}
       </div>
     </details>
   );

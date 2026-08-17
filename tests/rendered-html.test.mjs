@@ -79,3 +79,17 @@ test("mail sync retries transient failures and reuses one refreshed session", as
   assert.match(syncRoute, /const mailClient = await createAuthorizedMailClient\(request\)/);
   assert.match(syncRoute, /page_size: "10"/);
 });
+
+test("creator detail panel scrolls and historical messages expose the full body", async () => {
+  const [page, styles, threadRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+    readFile(new URL("app/api/mail/thread/route.ts", root), "utf8"),
+  ]);
+
+  assert.match(page, /展开完整正文/);
+  assert.match(page, /<ImportedEmailBody value=\{fullBody\}/);
+  assert.match(styles, /\.detail \{[^}]*max-height: calc\(100dvh - 48px\)[^}]*overflow-y: auto/);
+  assert.match(styles, /\.historyFullBody \.importedBody/);
+  assert.doesNotMatch(threadRoute, /body_text: row\.body_text\?\.slice/);
+});

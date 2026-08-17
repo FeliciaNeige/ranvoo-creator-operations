@@ -47,7 +47,7 @@ export async function GET(request: Request): Promise<Response> {
         ...row,
         recipients: safeJson(row.recipients_json, []),
         recipients_json: undefined,
-        body_text: row.body_text?.slice(0, 8000) ?? null,
+        body_text: row.body_text ?? null,
       })),
     }, { headers });
   } catch (error) {
