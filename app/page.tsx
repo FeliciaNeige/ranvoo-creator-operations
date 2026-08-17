@@ -52,6 +52,10 @@ type Creator = {
     tableId: string | null;
     recordId: string | null;
     tableStage: string | null;
+    currentStageValue?: unknown;
+    progressField?: string | null;
+    updateDateField?: string | null;
+    updateDateValue?: unknown;
     proposedChanges: {
       field: string;
       oldValue: unknown;
@@ -93,6 +97,10 @@ type AnalysisApiItem = {
     recordId: string | null;
     duplicateRecordIds: string[];
     currentStage: string | null;
+    currentStageValue?: unknown;
+    progressField?: string | null;
+    updateDateField?: string | null;
+    updateDateValue?: unknown;
     proposedChanges: {
       field: string;
       oldValue: unknown;
@@ -170,6 +178,29 @@ const todayLabel = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   timeZone: "Asia/Shanghai",
 }).format(new Date());
+
+const todayDateValue = (() => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Shanghai",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+})();
+
+const collaborationStageOptions = [
+  "已触达", "等待回复", "有兴趣", "洽谈", "已合作", "合同中", "待地址",
+  "待发货", "运输中", "产品体验", "Brief 已发送", "内容制作中", "草稿审核",
+  "修改中", "待发布", "已发布", "待付款", "已完成", "不合作", "终止合作",
+  "Initial Outreach Sent", "Awaiting Creator Reply", "Interested / Requirements Pending",
+  "Negotiating Scope or Price", "Collaboration Agreed", "Contract Pending",
+  "Address Pending", "Sample Pending Shipment", "In Transit", "Delivered / Experience Period",
+  "Brief Pending or Sent", "Content Pending", "Draft Received / Review", "Revision Pending",
+  "Approved / Posting Pending", "Published", "Payment Pending", "Completed", "Declined",
+  "Termination Candidate", "Terminated",
+];
 
 const seedCreators: Creator[] = [
   {
@@ -332,6 +363,10 @@ function shanghaiInputToTimestamp(value: string): number | undefined {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return undefined;
   const timestamp = Date.parse(`${value}:00+08:00`);
   return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function isValidScheduledTimestamp(value?: number): value is number {
+  return Boolean(value && value >= Date.now() + 5 * 60_000);
 }
 
 function formatScheduledDate(value: number) {
@@ -507,6 +542,10 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
       tableId: item.tableMatch.tableId,
       recordId: item.tableMatch.recordId,
       tableStage,
+      currentStageValue: item.tableMatch.currentStageValue,
+      progressField: item.tableMatch.progressField,
+      updateDateField: item.tableMatch.updateDateField,
+      updateDateValue: item.tableMatch.updateDateValue,
       proposedChanges: item.tableMatch.proposedChanges,
       unresolvedFields: item.tableMatch.unresolvedFields,
       tableMessage: item.tableMatch.message ?? null,
@@ -990,7 +1029,7 @@ export default function Home() {
     let sendAt: number | undefined;
     if (deliveryMode === "schedule") {
       sendAt = shanghaiInputToTimestamp(scheduledAt);
-      if (!sendAt || sendAt < Date.now() + 5 * 60_000) {
+      if (!isValidScheduledTimestamp(sendAt)) {
         setNotice("请选择至少晚于当前时间5分钟的定时发送时间。");
         return;
       }
@@ -1574,7 +1613,13 @@ export default function Home() {
                   />
                   {selectedMailEmail && (
                     <MailReplyComposer
-                      key={selectedImported.message_id}
+                      key={[
+                        selectedImported.message_id,
+                        selectedMailCreator?.analysis?.recordId,
+                        selectedMailCreator?.analysis?.tableStage,
+                        selectedMailCreator?.analysis?.progressField,
+                        selectedMailCreator?.analysis?.updateDateField,
+                      ].join(":")}
                       email={selectedImported}
                       recipientEmail={selectedMailEmail}
                       connected={connected}
@@ -2079,17 +2124,56 @@ function MailReplyComposer({
   const [sendAtInput, setSendAtInput] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [syncTable, setSyncTable] = useState(true);
+  const [progressValue, setProgressValue] = useState(
+    creator?.analysis?.tableStage || creator?.analysis?.emailStage || "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const subject = /^\s*re:/i.test(email.subject)
     ? email.subject
     : `Re: ${email.subject}`;
   const tableAnalysis = creator?.analysis;
-  const canUpdateTable = Boolean(
+  const canUpdateTableRecord = Boolean(
     tableAnalysis?.tableStatus === "matched" &&
     tableAnalysis.tableId &&
-    tableAnalysis.recordId &&
-    tableAnalysis.proposedChanges.length,
+    tableAnalysis.recordId,
   );
+  const canEditProgress = Boolean(
+    canUpdateTableRecord &&
+    tableAnalysis?.progressField &&
+    tableAnalysis.updateDateField,
+  );
+  const normalizedProgress = progressValue.trim();
+  const progressChanged = Boolean(
+    canEditProgress &&
+    normalizedProgress &&
+    normalizedProgress !== (tableAnalysis?.tableStage ?? ""),
+  );
+  const protectedFields = new Set([
+    tableAnalysis?.progressField,
+    tableAnalysis?.updateDateField,
+  ].filter((field): field is string => Boolean(field)));
+  const tableChanges = [
+    ...(progressChanged && tableAnalysis?.progressField
+      ? [{
+          field: tableAnalysis.progressField,
+          oldValue: tableAnalysis.currentStageValue ?? tableAnalysis.tableStage,
+          newValue: normalizedProgress,
+          reason: "由 Felicia 在邮件发送前手动确认合作进度",
+        }]
+      : []),
+    ...(progressChanged && tableAnalysis?.updateDateField
+      ? [{
+          field: tableAnalysis.updateDateField,
+          oldValue: tableAnalysis.updateDateValue ?? null,
+          newValue: todayDateValue,
+          reason: "合作进度变化时同步更新当天日期",
+        }]
+      : []),
+    ...(tableAnalysis?.proposedChanges ?? []).filter(
+      (change) => !protectedFields.has(change.field),
+    ),
+  ];
+  const canUpdateTable = canUpdateTableRecord && tableChanges.length > 0;
 
   async function sendReply() {
     if (!connected) {
@@ -2109,7 +2193,7 @@ function MailReplyComposer({
     let sendAt: number | undefined;
     if (mode === "schedule") {
       sendAt = shanghaiInputToTimestamp(sendAtInput);
-      if (!sendAt || sendAt < Date.now() + 5 * 60_000) {
+      if (!isValidScheduledTimestamp(sendAt)) {
         onNotice("请选择至少晚于当前时间5分钟的定时发送时间。");
         return;
       }
@@ -2158,7 +2242,7 @@ function MailReplyComposer({
             body: JSON.stringify({
               tableId: tableAnalysis.tableId,
               recordId: tableAnalysis.recordId,
-              changes: tableAnalysis.proposedChanges,
+              changes: tableChanges,
               confirmed: true,
             }),
           });
@@ -2236,11 +2320,53 @@ function MailReplyComposer({
           />
           <span>
             <b>发送后同步更新飞书总表</b>
-            {canUpdateTable
-              ? `已匹配 ${tableAnalysis?.tableName ?? "总表"}，共 ${tableAnalysis?.proposedChanges.length ?? 0} 个字段待更新`
+            {canUpdateTableRecord
+              ? tableChanges.length
+                ? `已匹配 ${tableAnalysis?.tableName ?? "总表"}，共 ${tableChanges.length} 个字段待更新`
+                : `已匹配 ${tableAnalysis?.tableName ?? "总表"}，当前没有字段变化`
               : "尚未唯一匹配到记录，需转到今日工作台核对"}
           </span>
         </label>
+      </div>
+      <div className="mailTableProgressEditor">
+        <div className="mailTableProgressHead">
+          <span><b>合作进度</b>发送成功后写入对应多维表</span>
+          <small>当前：{tableAnalysis?.tableStage || "空"}</small>
+        </div>
+        <label>
+          <span>发送后的合作进度</span>
+          <input
+            type="text"
+            list={`collaboration-stages-${email.message_id}`}
+            value={progressValue}
+            disabled={!canEditProgress || mode === "schedule"}
+            onChange={(event) => {
+              setProgressValue(event.target.value);
+              setSyncTable(true);
+              setConfirmed(false);
+            }}
+            placeholder="输入或选择合作进度"
+          />
+          <datalist id={`collaboration-stages-${email.message_id}`}>
+            {collaborationStageOptions.map((stage) => <option key={stage} value={stage} />)}
+          </datalist>
+        </label>
+        {!canUpdateTableRecord && <p>只有唯一匹配到飞书记录后才能修改合作进度。</p>}
+        {canUpdateTableRecord && !canEditProgress && <p>对应表缺少“合作进度”或“更新日期”字段，请先检查表结构。</p>}
+        {mode === "schedule" && <p>定时邮件不会提前修改合作进度；切换为“立即发送”后可同步更新。</p>}
+        {syncTable && tableChanges.length > 0 && mode === "now" && (
+          <div className="mailTableChangePreview">
+            <b>飞书表格更新预览</b>
+            {tableChanges.map((change) => (
+              <div key={change.field}>
+                <span>{change.field}</span>
+                <del>{displayFieldValue(change.oldValue)}</del>
+                <i>→</i>
+                <ins>{displayFieldValue(change.newValue)}</ins>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="deliveryBlock compactDelivery">
         <div className="deliveryChoices">

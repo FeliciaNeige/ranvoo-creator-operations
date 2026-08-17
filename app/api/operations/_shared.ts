@@ -50,6 +50,10 @@ export type BaseMatch = {
   recordId: string | null;
   duplicateRecordIds: string[];
   currentStage: string | null;
+  currentStageValue?: unknown;
+  progressField?: string | null;
+  updateDateField?: string | null;
+  updateDateValue?: unknown;
   proposedChanges: {
     field: string;
     oldValue: unknown;
@@ -134,6 +138,7 @@ export async function matchAnalysesToBase(
     string,
     {
       tableId: string;
+      fieldNames: string[];
       records: {
         record_id: string;
         fields: Record<string, unknown>;
@@ -145,8 +150,10 @@ export async function matchAnalysesToBase(
     [...requestedTableNames].map(async (tableName) => {
       const table = tables.find((item) => item.name === tableName);
       if (!table) return;
+      const fields = await listAllFields(client, appToken, table.table_id);
       recordsByTable.set(tableName as string, {
         tableId: table.table_id,
+        fieldNames: fields.map((field) => field.field_name),
         records: await searchRecordsForEmails(
           client,
           appToken,
@@ -154,6 +161,7 @@ export async function matchAnalysesToBase(
           analyses
             .filter((analysis) => analysis.sourceTable === tableName)
             .map((analysis) => analysis.email),
+          fields,
         ),
       });
     }),
@@ -208,6 +216,7 @@ export async function matchAnalysesToBase(
         table.tableId,
         matches[0],
         analysis,
+        table.fieldNames,
       ),
     );
   }
@@ -241,18 +250,26 @@ function buildMatchedPreview(
   tableId: string,
   record: { record_id: string; fields: Record<string, unknown> },
   analysis: CreatorThreadAnalysis,
+  availableFieldNames: string[],
 ): BaseMatch {
   const aliases: Record<string, string[]> = {
     合作进度: ["合作进度", "当前阶段", "进度", "Status"],
-    更新日期: ["更新日期", "Update Date", "Last Updated"],
+    更新日期: ["更新日期", "更新时间", "最后更新时间", "Update Date", "Last Updated"],
     最后收信日期: ["最后收信日期", "最后回复日期", "Last Inbound"],
     最后发信日期: ["最后发信日期", "最后跟进日期", "Last Outbound"],
     下一步: ["下一步", "下次操作", "Next Action"],
   };
   const proposedChanges: BaseMatch["proposedChanges"] = [];
   const unresolvedFields: string[] = [];
-  const progressField = aliases["合作进度"].find((candidate) =>
-    Object.hasOwn(record.fields, candidate),
+  const progressField = findSchemaField(
+    aliases["合作进度"],
+    availableFieldNames,
+    /^(?:合作.*进度|当前.*阶段|collaboration.*(?:progress|status)|status)$/i,
+  );
+  const updateDateField = findSchemaField(
+    aliases["更新日期"],
+    availableFieldNames,
+    /^(?:更新.*(?:日期|时间)|最后更新.*|(?:last.*updated?|update.*date))$/i,
   );
   const progressChanged = Boolean(
     progressField &&
@@ -262,7 +279,7 @@ function buildMatchedPreview(
   for (const proposed of analysis.proposedFields) {
     if (proposed.field === "更新日期" && !progressChanged) continue;
     const actualField = (aliases[proposed.field] ?? [proposed.field]).find(
-      (candidate) => Object.hasOwn(record.fields, candidate),
+      (candidate) => availableFieldNames.includes(candidate),
     );
     if (!actualField) {
       unresolvedFields.push(proposed.field);
@@ -290,10 +307,29 @@ function buildMatchedPreview(
         record.fields["进度"] ??
         record.fields["Status"],
     ),
+    currentStageValue: progressField ? record.fields[progressField] : null,
+    progressField: progressField ?? null,
+    updateDateField: updateDateField ?? null,
+    updateDateValue: updateDateField ? record.fields[updateDateField] : null,
     proposedChanges,
     unresolvedFields,
     message: `已按邮箱匹配到 ${tableName}`,
   };
+}
+
+function findSchemaField(
+  aliases: string[],
+  fieldNames: string[],
+  fallback: RegExp,
+): string | undefined {
+  const normalize = (value: string) =>
+    value.normalize("NFKC").replace(/[\s_（）()【】\[\]:：-]+/g, "").toLowerCase();
+  const normalizedAliases = new Set(aliases.map(normalize));
+  return (
+    fieldNames.find((fieldName) => aliases.includes(fieldName)) ??
+    fieldNames.find((fieldName) => normalizedAliases.has(normalize(fieldName))) ??
+    fieldNames.find((fieldName) => fallback.test(fieldName.trim()))
+  );
 }
 
 async function listAllTables(
@@ -349,9 +385,9 @@ async function searchRecordsForEmails(
   appToken: string,
   tableId: string,
   emails: string[],
+  fields: NonNullable<FieldListData["items"]>,
 ) {
   if (!emails.length) return [];
-  const fields = await listAllFields(client, appToken, tableId);
   const emailFields = fields.filter((field) =>
     field.ui_type === "Email" ||
     /email|e-mail|邮箱|邮件|联系|contact/i.test(field.field_name),

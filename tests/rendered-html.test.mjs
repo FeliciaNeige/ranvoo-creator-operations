@@ -93,3 +93,22 @@ test("creator detail panel scrolls and historical messages expose the full body"
   assert.match(styles, /\.historyFullBody \.importedBody/);
   assert.doesNotMatch(threadRoute, /body_text: row\.body_text\?\.slice/);
 });
+
+test("mail thread composer previews an editable collaboration progress update", async () => {
+  const [page, matchRoute, updateRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/operations/_shared.ts", root), "utf8"),
+    readFile(new URL("app/api/operations/update-record/route.ts", root), "utf8"),
+  ]);
+
+  assert.match(page, /发送后的合作进度/);
+  assert.match(page, /mailTableChangePreview/);
+  assert.match(page, /changes: tableChanges/);
+  assert.match(page, /setConfirmed\(false\)/);
+  assert.match(matchRoute, /currentStageValue/);
+  assert.match(matchRoute, /updateDateValue/);
+  assert.match(matchRoute, /fieldNames: fields\.map/);
+  assert.match(matchRoute, /availableFieldNames\.includes/);
+  assert.match(updateRoute, /isUpdateDateField\(field\)/);
+  assert.match(updateRoute, /更新时间/);
+});

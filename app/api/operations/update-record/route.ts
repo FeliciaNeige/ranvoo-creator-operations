@@ -21,7 +21,7 @@ type RecordData = {
 
 const allowedFields = new Set([
   "合作进度", "当前阶段", "进度", "Status",
-  "更新日期", "Update Date", "Last Updated",
+  "更新日期", "更新时间", "最后更新时间", "Update Date", "Last Updated",
   "最后收信日期", "最后回复日期", "Last Inbound",
   "最后发信日期", "最后跟进日期", "Last Outbound",
   "下一步", "下次操作", "Next Action",
@@ -44,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!/^tbl[A-Za-z0-9]+$/.test(tableId) || !/^rec[A-Za-z0-9]+$/.test(recordId)) {
       throw new OperationsApiError(400, "多维表记录信息不完整。");
     }
-    if (!changes.length || changes.some((change) => !allowedFields.has(change.field))) {
+    if (!changes.length || changes.some((change) => !isAllowedField(change.field))) {
       throw new OperationsApiError(400, "没有可安全写入的已确认字段。");
     }
 
@@ -63,7 +63,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     const updateFields = Object.fromEntries(changes.map((change) => [
       change.field,
-      normalizeFieldValue(change.field, change.oldValue, change.newValue),
+      normalizeFieldValue(change.field, change.newValue),
     ]));
     await client.request<RecordData>(path, {
       method: "PUT",
@@ -91,16 +91,27 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-function normalizeFieldValue(field: string, oldValue: unknown, newValue: unknown): unknown {
+function normalizeFieldValue(field: string, newValue: unknown): unknown {
   if (
-    typeof oldValue === "number" &&
     typeof newValue === "string" &&
-    /^(?:更新日期|Update Date|Last Updated)$/.test(field) &&
+    isUpdateDateField(field) &&
     /^\d{4}-\d{2}-\d{2}$/.test(newValue)
   ) {
     return Date.parse(`${newValue}T00:00:00+08:00`);
   }
   return newValue;
+}
+
+function isAllowedField(field: string): boolean {
+  return (
+    allowedFields.has(field) ||
+    /^(?:合作.*进度|当前.*阶段|collaboration.*(?:progress|status))$/i.test(field.trim()) ||
+    isUpdateDateField(field)
+  );
+}
+
+function isUpdateDateField(field: string): boolean {
+  return /^(?:更新.*(?:日期|时间)|最后更新.*|last.*updated?|update.*date)$/i.test(field.trim());
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
