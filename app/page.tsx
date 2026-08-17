@@ -256,6 +256,80 @@ function formatMailDate(value?: number | null) {
   }).format(new Date(value));
 }
 
+function splitEmailBody(value: string) {
+  const text = value.replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").trim();
+  const quotePatterns = [
+    /\sOn\s(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b[\s\S]{0,260}?\bwrote:\s/i,
+    /\s-{2,}\s*Original Message\s*-{2,}\s*/i,
+    /\sFrom:\s+(?:"|<|[A-Z])/i,
+  ];
+  const quoteIndex = quotePatterns.reduce((earliest, pattern) => {
+    const match = pattern.exec(text);
+    if (!match || (match.index ?? 0) < 40) return earliest;
+    return Math.min(earliest, match.index ?? earliest);
+  }, Number.POSITIVE_INFINITY);
+  const latest = Number.isFinite(quoteIndex)
+    ? text.slice(0, quoteIndex).trim()
+    : text;
+  const history = Number.isFinite(quoteIndex)
+    ? text.slice(quoteIndex).trim()
+    : "";
+  return {
+    latest: formatEmailSection(latest, false),
+    history: formatEmailSection(history, true),
+  };
+}
+
+function formatEmailSection(value: string, history: boolean) {
+  let text = value
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s+(https?:\/\/)/gi, "\n$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  text = text.replace(
+    /^((?:Hi|Hello|Dear)\s+[^,\n]{1,60},)\s+/i,
+    "$1\n\n",
+  );
+  text = text.replace(
+    /\s+((?:Best regards|Kind regards|Warm regards|Thank you|Sincerely|Regards|Thanks|Best),)\s+/gi,
+    "\n\n$1\n",
+  );
+  if (history) {
+    text = text
+      .replace(/\s+(On\s[^\n]{1,260}?\bwrote:)\s/gi, "\n\n$1\n")
+      .replace(/\s+(From:|Date:|Subject:|To:|Cc:)\s*/gi, "\n$1 ")
+      .replace(/\n{3,}/g, "\n\n");
+  }
+  return text;
+}
+
+function linkedEmailText(value: string) {
+  return value.split(/(https?:\/\/[^\s]+)/gi).map((part, index) =>
+    /^https?:\/\//i.test(part) ? (
+      <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  );
+}
+
+function ImportedEmailBody({ value }: { value: string }) {
+  const sections = splitEmailBody(value);
+  return (
+    <div className="importedBody">
+      <div className="emailLatest">{linkedEmailText(sections.latest)}</div>
+      {sections.history && (
+        <details className="quotedEmailHistory">
+          <summary>查看历史邮件内容</summary>
+          <div className="emailHistory">{linkedEmailText(sections.history)}</div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function toCreator(item: AnalysisApiItem, index: number): Creator {
   const matchedUpdates = item.tableMatch.proposedChanges.map((change) => ({
     field: change.field,
@@ -934,9 +1008,9 @@ export default function Home() {
                     <span><b>发件人</b>{selectedImported.sender_email || "—"}</span>
                     <span><b>时间</b>{formatMailDate(selectedImported.sent_at)}</span>
                   </div>
-                  <div className="importedBody">
-                    {selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
-                  </div>
+                  <ImportedEmailBody
+                    value={selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
+                  />
                   <div className="threadDecision">
                     <strong>下一步：识别红人并匹配合作记录</strong>
                     <p>邮件已保存在网站中。自动判断和写回表格仍会遵守确认门槛。</p>
