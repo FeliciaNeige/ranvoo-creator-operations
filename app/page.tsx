@@ -44,8 +44,14 @@ type Creator = {
     emailStage: string;
     tableStatus: "matched" | "unmatched" | "duplicate" | "unavailable";
     tableName: string | null;
+    tableId: string | null;
     recordId: string | null;
     tableStage: string | null;
+    proposedChanges: {
+      field: string;
+      oldValue: unknown;
+      newValue: unknown;
+    }[];
     unresolvedFields: string[];
   };
 };
@@ -76,6 +82,7 @@ type AnalysisApiItem = {
   tableMatch: {
     status: "matched" | "unmatched" | "duplicate" | "unavailable";
     tableName: string | null;
+    tableId: string | null;
     recordId: string | null;
     duplicateRecordIds: string[];
     currentStage: string | null;
@@ -101,6 +108,8 @@ type ImportedEmail = {
   snippet?: string | null;
   body_text?: string | null;
   direction: "inbound" | "outbound" | "unknown";
+  counterparty_email?: string | null;
+  message_count?: number;
   review_status?: "active" | "archive" | "trash";
 };
 
@@ -388,6 +397,20 @@ function ImportedEmailBody({ value }: { value: string }) {
   );
 }
 
+function CompactEmailPreview({ value }: { value: string }) {
+  const latest = splitEmailBody(value).latest.trim();
+  const preview = latest.length > 420 ? `${latest.slice(0, 420).trimEnd()}…` : latest;
+  return (
+    <>
+      <div className="latestMailPreview">{linkedEmailText(preview || "这封邮件没有可显示的纯文本正文。")}</div>
+      <details className="fullMailDetails">
+        <summary>展开完整邮件正文</summary>
+        <ImportedEmailBody value={value} />
+      </details>
+    </>
+  );
+}
+
 function toCreator(item: AnalysisApiItem, index: number): Creator {
   const tableStage = item.tableMatch.currentStage?.trim() || null;
   const stageConflict = Boolean(tableStage && tableStage !== item.stage);
@@ -459,8 +482,10 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
       emailStage: item.stage,
       tableStatus: item.tableMatch.status,
       tableName: item.tableMatch.tableName,
+      tableId: item.tableMatch.tableId,
       recordId: item.tableMatch.recordId,
       tableStage,
+      proposedChanges: item.tableMatch.proposedChanges,
       unresolvedFields: item.tableMatch.unresolvedFields,
     },
   };
@@ -493,9 +518,20 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
 }
 
 function counterpartyEmail(email: ImportedEmail): string {
+  if (email.counterparty_email) return email.counterparty_email.toLowerCase();
   return email.direction === "inbound"
     ? email.sender_email?.toLowerCase() ?? ""
     : email.recipients?.[0]?.email?.toLowerCase() ?? email.sender_email?.toLowerCase() ?? "";
+}
+
+function tableStageLabel(creator?: Creator): string {
+  if (!creator?.analysis) return "正在匹配总表";
+  if (creator.analysis.tableStatus === "matched") {
+    return creator.analysis.tableStage || "总表状态为空";
+  }
+  if (creator.analysis.tableStatus === "unmatched") return "总表未匹配";
+  if (creator.analysis.tableStatus === "duplicate") return "总表重复记录";
+  return "总表待连接";
 }
 
 export default function Home() {
@@ -526,6 +562,7 @@ export default function Home() {
   const [newEmail, setNewEmail] = useState("");
   const [newCategory, setNewCategory] = useState<Category>("UGC");
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [analysisLoaded, setAnalysisLoaded] = useState(false);
   const [importedEmails, setImportedEmails] = useState<ImportedEmail[]>([]);
   const [mailSync, setMailSync] = useState<MailSync>({
     total_imported: 0,
@@ -544,6 +581,7 @@ export default function Home() {
   const syncAllMailRef = useRef<(forceFull?: boolean) => Promise<void>>(
     async () => {},
   );
+  const mailThreadPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -590,6 +628,13 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, connected, search]);
 
+  useEffect(() => {
+    if (view !== "mail" || !connected || analysisLoaded || reanalyzing) return;
+    void runAnalysis(true);
+    // 邮件页首次进入时自动加载飞书总表标签。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, connected, analysisLoaded, reanalyzing]);
+
   const visible = useMemo(
     () => creators.filter((creator) =>
       (filter === "全部" || creator.urgency === filter) &&
@@ -604,8 +649,17 @@ export default function Home() {
   const selectedImported =
     importedEmails.find((email) => email.message_id === selectedMailId) ??
     importedEmails[0];
+  const creatorsByEmail = useMemo(
+    () => new Map(creators.map((creator) => [creator.email.toLowerCase(), creator])),
+    [creators],
+  );
   const selectedMailEmail = selectedImported ? counterpartyEmail(selectedImported) : "";
-  const selectedMailCreator = creators.find((creator) => creator.email.toLowerCase() === selectedMailEmail);
+  const selectedMailCreator = creatorsByEmail.get(selectedMailEmail);
+  const selectedMailDisplayName = selectedMailCreator?.name || (
+    selectedImported?.direction === "outbound"
+      ? selectedImported.recipients?.[0]?.name || selectedMailEmail
+      : selectedImported?.sender_name || selectedMailEmail || "未知红人"
+  );
 
   useEffect(() => {
     if (!connected || !selected?.email) return;
@@ -614,6 +668,7 @@ export default function Home() {
 
   useEffect(() => {
     if (view !== "mail" || !selectedImported) return;
+    mailThreadPanelRef.current?.scrollTo({ top: 0, behavior: "auto" });
     const email = counterpartyEmail(selectedImported);
     if (email) void loadThread(email);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -634,13 +689,13 @@ export default function Home() {
     setEditing(false);
   }
 
-  async function runAnalysis() {
+  async function runAnalysis(silent = false) {
     if (!connected) {
       setNotice("请先连接飞书并完成邮件迁移，再运行真实邮箱分析。");
       return;
     }
     setReanalyzing(true);
-    setNotice("正在按邮箱归并邮件，并以最新邮件结合历史上下文判断进度…");
+    if (!silent) setNotice("正在按邮箱归并邮件，并以最新邮件结合历史上下文判断进度…");
     try {
       const response = await fetch("/api/operations/analyze", {
         method: "POST",
@@ -679,8 +734,9 @@ export default function Home() {
       );
       setSelectedId(nextCreators[0].id);
       setFilter("全部");
+      setAnalysisLoaded(true);
       setReanalyzing(false);
-      setNotice(
+      if (!silent) setNotice(
         `分析完成：${body.sourceEmailCount ?? 0} 封邮件合并为 ${
           body.uniqueCreatorCount ?? items.length
         } 个邮箱主记录，去除 ${
@@ -788,11 +844,57 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error || "邮件操作失败。");
       setApproved(false);
       setEditing(false);
-      setNotice(
-        result.scheduled && result.sendAt
-          ? `定时邮件已提交，将于 ${formatScheduledDate(result.sendAt)} 发送。可在飞书邮箱“定时发送”文件夹中查看或取消。`
-          : "邮件已发送。请在飞书发件箱确认发送结果；表格写回仍保持独立确认，不会自动修改。",
+      if (result.scheduled && result.sendAt) {
+        setNotice(
+          `定时邮件已提交，将于 ${formatScheduledDate(result.sendAt)} 发送。为避免提前改变合作进度，多维表将在邮件实际发出后再更新。`,
+        );
+        return;
+      }
+
+      const analysis = selected.analysis;
+      const canUpdateTable = Boolean(
+        analysis?.tableStatus === "matched" &&
+        analysis.tableId &&
+        analysis.recordId &&
+        analysis.proposedChanges.length,
       );
+      if (!canUpdateTable || !analysis?.tableId || !analysis.recordId) {
+        setNotice(
+          analysis?.tableStatus === "matched"
+            ? "邮件已发送；多维表当前没有需要修改的字段。"
+            : "邮件已发送；当前未唯一匹配到多维表记录，因此没有自动改表。",
+        );
+        return;
+      }
+
+      setNotice("邮件已发送，正在按已确认的新旧值更新飞书多维表…");
+      try {
+        const tableResponse = await fetch("/api/operations/update-record", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tableId: analysis.tableId,
+            recordId: analysis.recordId,
+            changes: analysis.proposedChanges,
+            confirmed: true,
+          }),
+        });
+        const tableResult = await readJsonResponse<{ error?: string }>(
+          tableResponse,
+          "多维表更新失败。",
+        );
+        if (!tableResponse.ok) {
+          throw new Error(tableResult.error || "多维表更新失败。");
+        }
+        setAnalysisLoaded(false);
+        setNotice("邮件已发送，飞书多维表也已按预览内容更新并完成校验。");
+      } catch (tableError) {
+        setNotice(
+          `邮件已经成功发送，但多维表没有更新：${
+            tableError instanceof Error ? tableError.message : "请重新分析后再处理。"
+          } 请勿重复发送邮件。`,
+        );
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "邮件操作失败。");
     } finally {
@@ -1079,7 +1181,7 @@ export default function Home() {
             <p className="sub">读取与整理可以自动完成；发送邮件、更新表格和终止合作必须由你确认。</p>
           </div>
           <div className="headerActions">
-            <button className="ghost" onClick={runAnalysis} disabled={reanalyzing}>{reanalyzing ? "分析中…" : "↻ 重新分析"}</button>
+            <button className="ghost" onClick={() => void runAnalysis(false)} disabled={reanalyzing}>{reanalyzing ? "分析中…" : "↻ 重新分析"}</button>
             <button className="primary" onClick={() => setModal("new")}>＋ 新建任务</button>
           </div>
         </header>
@@ -1192,8 +1294,8 @@ export default function Home() {
                 <button onClick={connectFeishu}>先连接飞书</button>
               )}
             </section>
-            <section className="pageGrid">
-              <div className="panel">
+            <section className="pageGrid mailWorkspaceGrid">
+              <div className="panel mailListPanel">
                 <div className="panelHead">
                   <div>
                     <h2>{mailLoaded ? "已迁移邮件" : "相关邮件线程"}</h2>
@@ -1201,29 +1303,35 @@ export default function Home() {
                       {mailLoading
                         ? "正在读取…"
                         : mailLoaded
-                          ? `已显示 ${importedEmails.length} / 共 ${mailTotal} 封`
-                          : "可按发件人、主题或正文搜索"}
+                          ? `已显示 ${importedEmails.length} / 共 ${mailTotal} 个邮件账号`
+                          : "每个邮箱只显示最新一封，可搜索全部历史"}
                     </p>
                   </div>
                   <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索邮件" />
                 </div>
                 <div className="mailList">
                   {importedEmails.length > 0
-                    ? importedEmails.map((email) => (
+                    ? importedEmails.map((email) => {
+                        const emailAddress = counterpartyEmail(email);
+                        const creator = creatorsByEmail.get(emailAddress);
+                        const displayName = creator?.name || (email.direction === "outbound"
+                          ? email.recipients?.[0]?.name || emailAddress
+                          : email.sender_name || emailAddress || "未知红人");
+                        return (
                         <button
                           key={email.message_id}
                           className={selectedImported?.message_id === email.message_id ? "selectedMail" : ""}
                           onClick={() => setSelectedMailId(email.message_id)}
                         >
-                          <span className="avatar">{initials(email.sender_name || email.sender_email || "邮件")}</span>
+                          <span className="avatar">{initials(displayName)}</span>
                           <span>
-                            <strong>{email.sender_name || email.sender_email || "未知发件人"}</strong>
+                            <strong>{displayName}</strong>
                             <b>{email.subject}</b>
-                            <small>{formatMailDate(email.sent_at)}</small>
+                            <small>{formatMailDate(email.sent_at)} · 同邮箱 {email.message_count ?? 1} 封</small>
                           </span>
-                          <em>{email.direction === "outbound" ? "已发送" : "收件"}</em>
+                          <em className="mailStageTag">{tableStageLabel(creator)}</em>
                         </button>
-                      ))
+                      );})
                     : connected && mailLoaded
                       ? (
                         <div className="emptyMail">
@@ -1249,7 +1357,7 @@ export default function Home() {
                 )}
               </div>
               {selectedImported ? (
-                <div className="panel threadPanel">
+                <div className="panel threadPanel" ref={mailThreadPanelRef}>
                   <div className="mailAccountHeader">
                     <span className="avatar">FZ</span>
                     <div><b>当前邮件账户</b><strong>Felicia · 飞书邮箱</strong><small>{connected ? "已连接，可在本页预览与回复" : "未连接"}</small></div>
@@ -1257,34 +1365,38 @@ export default function Home() {
                   <span className="categoryTag">
                     {selectedMailCreator?.category ?? (selectedImported.direction === "outbound" ? "已发送" : "收件箱")}
                   </span>
-                  <h2>{selectedImported.sender_name || selectedImported.sender_email || "未知发件人"}</h2>
+                  <h2>{selectedMailDisplayName}</h2>
                   <p className="threadSubject">{selectedImported.subject}</p>
                   <div className="mailMeta">
-                    <span><b>发件人</b>{selectedImported.sender_email || "—"}</span>
+                    <span><b>对方邮箱</b>{selectedMailEmail || "—"}</span>
                     <span><b>时间</b>{formatMailDate(selectedImported.sent_at)}</span>
                   </div>
-                  <ImportedEmailBody
+                  <div className="mailWorkflowBridge">
+                    <span><b>飞书总表标签</b>{tableStageLabel(selectedMailCreator)}</span>
+                    <button onClick={() => {
+                      if (selectedMailCreator) chooseCreator(selectedMailCreator.id);
+                      navigate("dashboard");
+                    }}>转到今日工作台处理 →</button>
+                  </div>
+                  <CompactEmailPreview
                     value={selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
                   />
-                  <ThreadHistory messages={threadEmails} loading={threadLoading} />
-                  {selectedImported.direction === "inbound" && selectedImported.sender_email && (
+                  {selectedMailEmail && (
                     <MailReplyComposer
                       key={selectedImported.message_id}
                       email={selectedImported}
+                      recipientEmail={selectedMailEmail}
                       connected={connected}
                       creator={selectedMailCreator}
                       onNotice={setNotice}
+                      onTableUpdated={() => setAnalysisLoaded(false)}
                     />
                   )}
+                  <ThreadHistory messages={threadEmails} loading={threadLoading} />
                   <div className="mailDispositionTools">
                     <b>人工判断无需处理？</b>
-                    <button type="button" onClick={() => void changeMailDisposition(threadEmails.map((email) => email.message_id), "archive", selectedImported.sender_name || selectedMailEmail, selectedMailEmail)}>归档线程</button>
-                    <button type="button" className="dangerGhost" onClick={() => void changeMailDisposition(threadEmails.map((email) => email.message_id), "trash", selectedImported.sender_name || selectedMailEmail, selectedMailEmail)}>移到工作台垃圾箱</button>
-                  </div>
-                  <div className="threadDecision">
-                    <strong>飞书总表状态：{selectedMailCreator?.analysis?.tableStage ?? "待匹配"}</strong>
-                    <p>时间提醒：{selectedMailCreator?.urgency ?? "待分析"}。两者分开显示，合作状态以总表为准；邮件只生成建议和变更预览。</p>
-                    <button onClick={() => navigate("dashboard")}>进入红人跟进工作台 →</button>
+                    <button type="button" onClick={() => void changeMailDisposition(threadEmails.map((email) => email.message_id), "archive", selectedMailDisplayName, selectedMailEmail)}>归档线程</button>
+                    <button type="button" className="dangerGhost" onClick={() => void changeMailDisposition(threadEmails.map((email) => email.message_id), "trash", selectedMailDisplayName, selectedMailEmail)}>移到工作台垃圾箱</button>
                   </div>
                 </div>
               ) : (
@@ -1605,7 +1717,7 @@ function Workspace({
               ? "确认并定时发送"
               : "确认并立即发送"}
         </button>
-        <p className="safetyNote">发送邮件会真实执行；飞书表格更新仍需单独确认</p>
+        <p className="safetyNote">立即发送成功后，将按上方已确认的新旧值同步更新飞书总表；定时邮件不会提前改表</p>
         <div className="noActionTools">
           <span>人工判断无需处理</span>
           <button type="button" onClick={() => onDisposition("archive")} disabled={!history.length}>归档线程</button>
@@ -1683,27 +1795,39 @@ function RichTextEditor({
 
 function MailReplyComposer({
   email,
+  recipientEmail,
   connected,
   creator,
   onNotice,
+  onTableUpdated,
 }: {
   email: ImportedEmail;
+  recipientEmail: string;
   connected: boolean;
   creator?: Creator;
   onNotice: (value: string) => void;
+  onTableUpdated: () => void;
 }) {
-  const firstName = email.sender_name?.trim().split(/\s+/)[0] ?? "there";
-  const [open, setOpen] = useState(false);
+  const firstName = creator?.name?.trim().split(/\s+/)[0] || email.sender_name?.trim().split(/\s+/)[0] || "there";
+  const [open, setOpen] = useState(true);
   const [html, setHtml] = useState(
     `<p>Hi ${firstName},</p><p><br></p><p>Best,<br>Felicia</p>`,
   );
   const [mode, setMode] = useState<"now" | "schedule">("now");
   const [sendAtInput, setSendAtInput] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [syncTable, setSyncTable] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const subject = /^\s*re:/i.test(email.subject)
     ? email.subject
     : `Re: ${email.subject}`;
+  const tableAnalysis = creator?.analysis;
+  const canUpdateTable = Boolean(
+    tableAnalysis?.tableStatus === "matched" &&
+    tableAnalysis.tableId &&
+    tableAnalysis.recordId &&
+    tableAnalysis.proposedChanges.length,
+  );
 
   async function sendReply() {
     if (!connected) {
@@ -1735,7 +1859,7 @@ function MailReplyComposer({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: email.sender_email,
+          to: recipientEmail,
           subject,
           html: cleanHtml,
           plainText,
@@ -1751,11 +1875,55 @@ function MailReplyComposer({
       }>(response, "邮件操作失败。");
       if (!response.ok) throw new Error(result.error || "邮件操作失败。");
       setConfirmed(false);
+      if (result.scheduled && result.sendAt) {
+        setOpen(false);
+        onNotice(
+          `定时回复已提交，将于 ${formatScheduledDate(result.sendAt)} 发送。为避免提前改变合作进度，多维表暂未更新。`,
+        );
+        return;
+      }
+      if (
+        syncTable &&
+        canUpdateTable &&
+        tableAnalysis?.tableId &&
+        tableAnalysis.recordId
+      ) {
+        onNotice("回复已发送，正在同步更新飞书多维表…");
+        try {
+          const tableResponse = await fetch("/api/operations/update-record", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tableId: tableAnalysis.tableId,
+              recordId: tableAnalysis.recordId,
+              changes: tableAnalysis.proposedChanges,
+              confirmed: true,
+            }),
+          });
+          const tableResult = await readJsonResponse<{ error?: string }>(
+            tableResponse,
+            "多维表更新失败。",
+          );
+          if (!tableResponse.ok) throw new Error(tableResult.error || "多维表更新失败。");
+          onTableUpdated();
+          setOpen(false);
+          onNotice("回复已发送，飞书多维表也已按预览内容更新并校验完成。");
+          return;
+        } catch (tableError) {
+          setOpen(false);
+          onNotice(
+            `回复已经成功发送，但多维表没有更新：${
+              tableError instanceof Error ? tableError.message : "请重新分析后再处理。"
+            } 请勿重复发送邮件。`,
+          );
+          return;
+        }
+      }
       setOpen(false);
       onNotice(
-        result.scheduled && result.sendAt
-          ? `定时回复已提交，将于 ${formatScheduledDate(result.sendAt)} 发送。可在飞书邮箱“定时发送”文件夹中管理。`
-          : "回复已发送，请在飞书发件箱确认发送结果。",
+        canUpdateTable
+          ? "回复已发送；你选择了不同时更新多维表。"
+          : "回复已发送；当前没有可安全写入的唯一多维表记录。",
       );
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "邮件操作失败。");
@@ -1775,13 +1943,13 @@ function MailReplyComposer({
   return (
     <section className="mailReplyComposer">
       <div className="replyComposerHead">
-        <div><strong>回复邮件</strong><small>收件人：{email.sender_email}</small></div>
+        <div><strong>邮件回复预览</strong><small>收件人：{recipientEmail}</small></div>
         <button type="button" onClick={() => setOpen(false)}>收起</button>
       </div>
       <div className="replySubject"><b>主题</b><span>{subject}</span></div>
       <SmartReplyGenerator
         creatorName={creator?.name || email.sender_name || email.sender_email || "Creator"}
-        creatorEmail={email.sender_email || ""}
+        creatorEmail={recipientEmail}
         category={creator?.category || "未分类"}
         emailStage={creator?.analysis?.emailStage || creator?.stage || "Needs review"}
         tableStage={creator?.analysis?.tableStage}
@@ -1796,6 +1964,22 @@ function MailReplyComposer({
           setConfirmed(false);
         }}
       />
+      <div className="inlineTableUpdate">
+        <label>
+          <input
+            type="checkbox"
+            checked={syncTable && canUpdateTable}
+            disabled={!canUpdateTable || mode === "schedule"}
+            onChange={(event) => { setSyncTable(event.target.checked); setConfirmed(false); }}
+          />
+          <span>
+            <b>发送后同步更新飞书总表</b>
+            {canUpdateTable
+              ? `已匹配 ${tableAnalysis?.tableName ?? "总表"}，共 ${tableAnalysis?.proposedChanges.length ?? 0} 个字段待更新`
+              : "尚未唯一匹配到记录，需转到今日工作台核对"}
+          </span>
+        </label>
+      </div>
       <div className="deliveryBlock compactDelivery">
         <div className="deliveryChoices">
           <button type="button" className={mode === "now" ? "selected" : ""} onClick={() => { setMode("now"); setConfirmed(false); }}>立即发送</button>
@@ -1810,7 +1994,7 @@ function MailReplyComposer({
       </div>
       <label className="confirm replyConfirm">
         <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-        <span>我已核对收件人、主题、正文和发送时间</span>
+        <span>我已核对收件人、主题、正文、发送时间及上方多维表操作</span>
       </label>
       <button className="execute" type="button" disabled={submitting} onClick={() => void sendReply()}>
         {submitting ? "正在提交…" : mode === "schedule" ? "确认并定时发送" : "确认并立即发送"}

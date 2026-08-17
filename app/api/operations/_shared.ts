@@ -97,22 +97,7 @@ export async function matchAnalysesToBase(
   client: Awaited<ReturnType<typeof createFeishuClient>>,
   analyses: CreatorThreadAnalysis[],
 ): Promise<Map<string, BaseMatch>> {
-  const wikiToken =
-    process.env.FEISHU_BASE_WIKI_TOKEN ??
-    "Cvdnw4BuCio5A4k9vG9cBfbHn5c";
-  const appToken =
-    process.env.FEISHU_BASE_APP_TOKEN ??
-    (
-      await client.request<WikiNodeData>(
-        `/wiki/v2/spaces/get_node?token=${encodeURIComponent(wikiToken)}`,
-      )
-    ).node?.obj_token;
-  if (!appToken) {
-    throw new OperationsApiError(
-      502,
-      "无法从知识库链接解析多维表 app_token。",
-    );
-  }
+  const appToken = await resolveBaseAppToken(client);
 
   const tables = await listAllTables(client, appToken);
   const requestedTableNames = new Set(
@@ -189,6 +174,28 @@ export async function matchAnalysesToBase(
     );
   }
   return result;
+}
+
+export async function resolveBaseAppToken(
+  client: Awaited<ReturnType<typeof createFeishuClient>>,
+): Promise<string> {
+  const wikiToken =
+    process.env.FEISHU_BASE_WIKI_TOKEN ??
+    "Cvdnw4BuCio5A4k9vG9cBfbHn5c";
+  const appToken =
+    process.env.FEISHU_BASE_APP_TOKEN ??
+    (
+      await client.request<WikiNodeData>(
+        `/wiki/v2/spaces/get_node?token=${encodeURIComponent(wikiToken)}`,
+      )
+    ).node?.obj_token;
+  if (!appToken) {
+    throw new OperationsApiError(
+      502,
+      "无法从知识库链接解析多维表 app_token。",
+    );
+  }
+  return appToken;
 }
 
 function buildMatchedPreview(
