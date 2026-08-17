@@ -13,6 +13,7 @@ type FeishuEnvelope<T> = {
 export async function authorizedMailRequest<T>(
   request: Request,
   path: string,
+  init: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown } = {},
 ): Promise<{
   data: T;
   setCookie?: string;
@@ -22,10 +23,12 @@ export async function authorizedMailRequest<T>(
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const response = await fetch(`${FEISHU_API_BASE}${path}`, {
+      method: init.method ?? "GET",
       headers: {
         Authorization: `Bearer ${auth.session.accessToken}`,
         "Content-Type": "application/json; charset=utf-8",
       },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
     const body = (await response.json()) as FeishuEnvelope<T>;
     const rateLimited =
@@ -43,7 +46,7 @@ export async function authorizedMailRequest<T>(
     if (!response.ok || (typeof body.code === "number" && body.code !== 0)) {
       const message =
         body.code === 1230002
-          ? "缺少飞书邮箱读取权限，请发布新版应用后重新授权。"
+          ? "缺少所需的飞书邮箱权限，请发布新版应用后重新授权。"
           : body.msg || "飞书邮箱暂时无法读取。";
       throw new MailApiError(response.status || 502, message, body.code);
     }

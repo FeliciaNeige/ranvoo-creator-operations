@@ -34,7 +34,9 @@ export async function GET(): Promise<Response> {
       [
         "bitable:app",
         "wiki:node:read",
+        "mail:user_mailbox:readonly",
         "mail:user_mailbox.message:send",
+        "mail:user_mailbox.message:modify",
         "mail:user_mailbox.message:readonly",
         "mail:user_mailbox.message.subject:read",
         "mail:user_mailbox.message.address:read",

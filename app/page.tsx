@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  htmlToPlainText,
+  plainTextToHtml,
+  sanitizeMailHtml,
+} from "../lib/mail-compose";
 
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
 type Category = "UGC" | "牙医合作" | "商业化红人" | "未分类";
@@ -21,6 +26,7 @@ type Creator = {
   lastInbound: string;
   lastOutbound: string;
   draft: string;
+  sourceMessageId?: string;
   updates: { field: string; from: string; to: string }[];
   transfer?: {
     source: string;
@@ -51,6 +57,7 @@ type AnalysisApiItem = {
   messageCount: number;
   threadCount: number;
   latestSubject: string;
+  latestMessageId: string;
   latestAt: number | null;
   latestSummary: string;
   lastInboundAt: number | null;
@@ -256,6 +263,39 @@ function formatMailDate(value?: number | null) {
   }).format(new Date(value));
 }
 
+function defaultScheduledInput() {
+  return shanghaiDateTimeInput(10);
+}
+
+function minimumScheduledInput() {
+  return shanghaiDateTimeInput(5);
+}
+
+function shanghaiDateTimeInput(minutesFromNow: number) {
+  return new Date(Date.now() + minutesFromNow * 60_000)
+    .toLocaleString("sv-SE", {
+      timeZone: "Asia/Shanghai",
+      hour12: false,
+    })
+    .slice(0, 16);
+}
+
+function shanghaiInputToTimestamp(value: string): number | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return undefined;
+  const timestamp = Date.parse(`${value}:00+08:00`);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function formatScheduledDate(value: number) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Shanghai",
+  }).format(new Date(value));
+}
+
 function splitEmailBody(value: string) {
   const text = value.replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").trim();
   const quotePatterns = [
@@ -384,6 +424,7 @@ function toCreator(item: AnalysisApiItem, index: number): Creator {
     lastInbound: formatMailDate(item.lastInboundAt),
     lastOutbound: formatMailDate(item.lastOutboundAt),
     draft: `【待生成：${item.messageScenario}】\n\n系统已完成线程判断。请先核对多维表匹配和真实商业条款，再从对应话术库生成最终回复。`,
+    sourceMessageId: item.latestMessageId,
     updates,
     transfer,
     analysis: {
@@ -422,7 +463,15 @@ export default function Home() {
   const [drafts, setDrafts] = useState<Record<number, string>>(
     Object.fromEntries(seedCreators.map((creator) => [creator.id, creator.draft])),
   );
+  const [draftHtmls, setDraftHtmls] = useState<Record<number, string>>(
+    Object.fromEntries(
+      seedCreators.map((creator) => [creator.id, plainTextToHtml(creator.draft)]),
+    ),
+  );
   const [editing, setEditing] = useState(false);
+  const [deliveryMode, setDeliveryMode] = useState<"now" | "schedule">("now");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [sendingMail, setSendingMail] = useState(false);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<"new" | "connect" | null>(null);
   const [newName, setNewName] = useState("");
@@ -503,6 +552,8 @@ export default function Home() {
     setApproved(false);
     setNotice("");
     setEditing(false);
+    setDeliveryMode("now");
+    setScheduledAt("");
   }
 
   function navigate(nextView: View) {
@@ -544,6 +595,14 @@ export default function Home() {
       setDrafts(
         Object.fromEntries(
           nextCreators.map((creator) => [creator.id, creator.draft]),
+        ),
+      );
+      setDraftHtmls(
+        Object.fromEntries(
+          nextCreators.map((creator) => [
+            creator.id,
+            plainTextToHtml(creator.draft),
+          ]),
         ),
       );
       setSelectedId(nextCreators[0].id);
@@ -596,6 +655,10 @@ export default function Home() {
     };
     setCreators((items) => [creator, ...items]);
     setDrafts((items) => ({ ...items, [id]: creator.draft }));
+    setDraftHtmls((items) => ({
+      ...items,
+      [id]: plainTextToHtml(creator.draft),
+    }));
     setSelectedId(id);
     setModal(null);
     setNewName("");
@@ -604,7 +667,7 @@ export default function Home() {
     setNotice("任务已加入本次演示队列。真实接入后，新记录仍需你确认才会写入飞书。");
   }
 
-  function requestExecution() {
+  async function requestExecution() {
     if (!connected) {
       setNotice(selected.transfer
         ? `当前为演示模式：已生成邮件、源表更新和“${selected.transfer.target}”建档预览，但不会执行真实操作。`
@@ -615,7 +678,54 @@ export default function Home() {
       setNotice("请先确认邮件正文和所有字段变更。");
       return;
     }
-    setNotice("执行请求已提交，正在逐项验证邮件发送与表格写回。");
+    const html = sanitizeMailHtml(draftHtmls[selected.id] ?? "");
+    const plainText = htmlToPlainText(html);
+    if (!plainText) {
+      setNotice("邮件正文不能为空。");
+      return;
+    }
+    let sendAt: number | undefined;
+    if (deliveryMode === "schedule") {
+      sendAt = shanghaiInputToTimestamp(scheduledAt);
+      if (!sendAt || sendAt < Date.now() + 5 * 60_000) {
+        setNotice("请选择至少晚于当前时间5分钟的定时发送时间。");
+        return;
+      }
+    }
+    setSendingMail(true);
+    setNotice(deliveryMode === "schedule" ? "正在提交定时邮件…" : "正在发送邮件…");
+    try {
+      const response = await fetch("/api/mail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: selected.email,
+          subject: selected.subject,
+          html,
+          plainText,
+          sourceMessageId: selected.sourceMessageId,
+          sendAt,
+          confirmed: true,
+        }),
+      });
+      const result = await response.json() as {
+        error?: string;
+        scheduled?: boolean;
+        sendAt?: number | null;
+      };
+      if (!response.ok) throw new Error(result.error || "邮件操作失败。");
+      setApproved(false);
+      setEditing(false);
+      setNotice(
+        result.scheduled && result.sendAt
+          ? `定时邮件已提交，将于 ${formatScheduledDate(result.sendAt)} 发送。可在飞书邮箱“定时发送”文件夹中查看或取消。`
+          : "邮件已发送。请在飞书发件箱确认发送结果；表格写回仍保持独立确认，不会自动修改。",
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "邮件操作失败。");
+    } finally {
+      setSendingMail(false);
+    }
   }
 
   function connectFeishu() {
@@ -873,10 +983,30 @@ export default function Home() {
             </section>
             <Workspace
               visible={visible} selected={selected} filter={filter} search={search}
-              drafts={drafts} approved={approved} editing={editing}
+              drafts={drafts} draftHtmls={draftHtmls} approved={approved} editing={editing}
+              deliveryMode={deliveryMode} scheduledAt={scheduledAt} sendingMail={sendingMail}
               onFilter={setFilter} onSearch={setSearch} onChoose={chooseCreator}
               onApprove={setApproved} onEdit={setEditing}
-              onDraft={(value) => setDrafts((items) => ({ ...items, [selected.id]: value }))}
+              onDraft={(value) => {
+                const clean = sanitizeMailHtml(value);
+                setDraftHtmls((items) => ({ ...items, [selected.id]: clean }));
+                setDrafts((items) => ({
+                  ...items,
+                  [selected.id]: htmlToPlainText(clean),
+                }));
+                setApproved(false);
+              }}
+              onDeliveryMode={(value) => {
+                setDeliveryMode(value);
+                if (value === "schedule" && !scheduledAt) {
+                  setScheduledAt(defaultScheduledInput());
+                }
+                setApproved(false);
+              }}
+              onScheduledAt={(value) => {
+                setScheduledAt(value);
+                setApproved(false);
+              }}
               onExecute={requestExecution}
             />
           </>
@@ -1122,14 +1252,20 @@ export default function Home() {
 }
 
 function Workspace({
-  visible, selected, filter, search, drafts, approved, editing,
-  onFilter, onSearch, onChoose, onApprove, onEdit, onDraft, onExecute,
+  visible, selected, filter, search, drafts, draftHtmls, approved, editing,
+  deliveryMode, scheduledAt, sendingMail,
+  onFilter, onSearch, onChoose, onApprove, onEdit, onDraft,
+  onDeliveryMode, onScheduledAt, onExecute,
 }: {
   visible: Creator[]; selected: Creator; filter: string; search: string;
-  drafts: Record<number, string>; approved: boolean; editing: boolean;
+  drafts: Record<number, string>; draftHtmls: Record<number, string>;
+  approved: boolean; editing: boolean;
+  deliveryMode: "now" | "schedule"; scheduledAt: string; sendingMail: boolean;
   onFilter: (value: string) => void; onSearch: (value: string) => void;
   onChoose: (id: number) => void; onApprove: (value: boolean) => void;
-  onEdit: (value: boolean) => void; onDraft: (value: string) => void; onExecute: () => void;
+  onEdit: (value: boolean) => void; onDraft: (value: string) => void;
+  onDeliveryMode: (value: "now" | "schedule") => void;
+  onScheduledAt: (value: string) => void; onExecute: () => void;
 }) {
   return (
     <section className="workspace">
@@ -1174,7 +1310,48 @@ function Workspace({
         <div className="analysisBlock"><label>判断依据</label><p>{selected.latest}</p><label>建议下一步</label><p>{selected.next}</p></div>
         <div className="draftBlock">
           <div className="blockHead"><label>邮件回复预览</label><button onClick={() => onEdit(!editing)}>{editing ? "完成" : "编辑"}</button></div>
-          {editing ? <textarea value={drafts[selected.id]} onChange={(event) => onDraft(event.target.value)} autoFocus /> : <pre>{drafts[selected.id]}</pre>}
+          {editing ? (
+            <RichTextEditor
+              value={draftHtmls[selected.id] ?? plainTextToHtml(drafts[selected.id] ?? "")}
+              onChange={onDraft}
+            />
+          ) : (
+            <div
+              className="richDraftPreview"
+              dangerouslySetInnerHTML={{
+                __html: sanitizeMailHtml(
+                  draftHtmls[selected.id] ?? plainTextToHtml(drafts[selected.id] ?? ""),
+                ),
+              }}
+            />
+          )}
+        </div>
+        <div className="deliveryBlock">
+          <label>发送时间</label>
+          <div className="deliveryChoices">
+            <button
+              type="button"
+              className={deliveryMode === "now" ? "selected" : ""}
+              onClick={() => onDeliveryMode("now")}
+            >立即发送</button>
+            <button
+              type="button"
+              className={deliveryMode === "schedule" ? "selected" : ""}
+              onClick={() => onDeliveryMode("schedule")}
+            >定时发送</button>
+          </div>
+          {deliveryMode === "schedule" && (
+            <div className="schedulePicker">
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                min={minimumScheduledInput()}
+                onChange={(event) => onScheduledAt(event.target.value)}
+                aria-label="定时发送时间（北京时间）"
+              />
+              <small>北京时间，至少提前5分钟；提交后由飞书服务器按时发送。</small>
+            </div>
+          )}
         </div>
         <div className="updates"><label>飞书表格更新预览</label>{selected.updates.map((update) => <div className="updateRow" key={update.field}><span>{update.field}</span><del>{update.from}</del><b>→</b><ins>{update.to}</ins></div>)}</div>
         {selected.transfer && (
@@ -1187,9 +1364,80 @@ function Workspace({
           </div>
         )}
         <label className="confirm"><input type="checkbox" checked={approved} onChange={(event) => onApprove(event.target.checked)} /><span>我已核对邮件正文及以上所有字段变更</span></label>
-        <button className="execute" onClick={onExecute}>确认发送并同步表格</button>
-        <p className="safetyNote">演示模式不会执行真实外部操作</p>
+        <button className="execute" onClick={onExecute} disabled={sendingMail}>
+          {sendingMail
+            ? "正在提交…"
+            : deliveryMode === "schedule"
+              ? "确认并定时发送"
+              : "确认并立即发送"}
+        </button>
+        <p className="safetyNote">发送邮件会真实执行；飞书表格更新仍需单独确认</p>
       </aside>
     </section>
+  );
+}
+
+function RichTextEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value;
+    }
+  }, [value]);
+
+  function run(command: string, commandValue?: string) {
+    editorRef.current?.focus();
+    document.execCommand(command, false, commandValue);
+    onChange(sanitizeMailHtml(editorRef.current?.innerHTML ?? ""));
+  }
+
+  function addLink() {
+    const url = window.prompt("请输入链接地址（https://…）");
+    if (!url) return;
+    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    run("createLink", normalized);
+  }
+
+  const controls = [
+    { label: "B", title: "加粗", command: "bold" },
+    { label: "I", title: "斜体", command: "italic" },
+    { label: "U", title: "下划线", command: "underline" },
+    { label: "▰", title: "黄色高亮", command: "hiliteColor", value: "#fff0a8" },
+    { label: "• 列表", title: "项目符号列表", command: "insertUnorderedList" },
+    { label: "1. 列表", title: "编号列表", command: "insertOrderedList" },
+  ];
+
+  return (
+    <div className="richEditorShell">
+      <div className="richToolbar" role="toolbar" aria-label="邮件格式工具">
+        {controls.map((control) => (
+          <button
+            key={control.title}
+            type="button"
+            title={control.title}
+            aria-label={control.title}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => run(control.command, control.value)}
+          >{control.label}</button>
+        ))}
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={addLink}>链接</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => run("removeFormat")}>清除格式</button>
+      </div>
+      <div
+        ref={editorRef}
+        className="richEditor"
+        contentEditable
+        suppressContentEditableWarning
+        onInput={(event) => onChange(sanitizeMailHtml(event.currentTarget.innerHTML))}
+        aria-label="邮件正文编辑器"
+      />
+    </div>
   );
 }

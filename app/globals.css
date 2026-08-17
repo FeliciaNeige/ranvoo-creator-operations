@@ -84,7 +84,23 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .route { display: flex; align-items: center; gap: 8px; padding: 13px 0; border-bottom: 1px solid var(--line); font-size: 9px; color: #89948e; }.route strong { color: #2c5742; background: #e5f0ea; padding: 5px 8px; border-radius: 6px; }.confidence { margin-left: auto; color: #458264; }
 .analysisBlock { padding: 15px 0 6px; }.analysisBlock label, .draftBlock label, .updates > label { display: block; color: #7c8882; font-size: 8px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; margin-bottom: 6px; }.analysisBlock p { margin: 0 0 13px; font-size: 10px; line-height: 1.55; color: #3e4b44; }
 .blockHead { display: flex; align-items: center; justify-content: space-between; }.blockHead button { border: 0; background: transparent; color: #397156; font-size: 9px; cursor: pointer; }
-.draftBlock pre, .draftBlock textarea { white-space: pre-wrap; font: 9px/1.55 Arial, sans-serif; color: #3d4842; background: #f7f8f7; border: 1px solid var(--line); border-radius: 9px; padding: 12px; height: 170px; width: 100%; overflow: auto; resize: vertical; }
+.richDraftPreview { font: 10px/1.65 Arial, sans-serif; color: #3d4842; background: #f7f8f7; border: 1px solid var(--line); border-radius: 9px; padding: 13px; min-height: 170px; max-height: 280px; overflow: auto; overflow-wrap: anywhere; }
+.richDraftPreview p, .richEditor p { margin: 0 0 10px; }.richDraftPreview p:last-child, .richEditor p:last-child { margin-bottom: 0; }
+.richDraftPreview ul, .richDraftPreview ol, .richEditor ul, .richEditor ol { margin: 8px 0; padding-left: 22px; }.richDraftPreview a, .richEditor a { color: #2d6e50; text-decoration: underline; }
+.richEditorShell { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: white; }
+.richToolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px; border-bottom: 1px solid var(--line); background: #f2f6f3; }
+.richToolbar button { min-width: 29px; height: 28px; border: 1px solid #d8e2dc; border-radius: 6px; padding: 0 8px; background: white; color: #385345; cursor: pointer; font-size: 9px; font-weight: 700; }
+.richToolbar button:hover { background: #e7f0eb; border-color: #bdd2c5; }
+.richEditor { min-height: 190px; max-height: 330px; overflow: auto; padding: 13px; outline: none; font: 10px/1.65 Arial, sans-serif; color: #34433b; overflow-wrap: anywhere; }
+.richEditor:focus { box-shadow: inset 0 0 0 2px rgba(49,128,92,.12); }
+.deliveryBlock { margin-top: 15px; padding: 12px; border: 1px solid #dfe7e2; border-radius: 10px; background: #fafcfb; }
+.deliveryBlock > label { display: block; margin-bottom: 8px; color: #7c8882; font-size: 8px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }
+.deliveryChoices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.deliveryChoices button { border: 1px solid #d9e3dd; border-radius: 8px; padding: 8px; background: white; color: #5d6d64; cursor: pointer; font-size: 9px; font-weight: 700; }
+.deliveryChoices button.selected { border-color: #4f856a; background: #e5f0ea; color: #2f654b; box-shadow: inset 0 0 0 1px #4f856a; }
+.schedulePicker { display: grid; gap: 6px; margin-top: 9px; }
+.schedulePicker input { width: 100%; border: 1px solid #d7e2db; border-radius: 8px; padding: 9px 10px; background: white; color: #36483f; font-size: 10px; }
+.schedulePicker small { color: #7e8b84; font-size: 8px; line-height: 1.45; }
 .updates { margin-top: 15px; }.updateRow { display: grid; grid-template-columns: 1fr 1fr 14px 1fr; gap: 6px; align-items: center; padding: 7px 0; border-bottom: 1px dashed #e7eae8; font-size: 8px; }.updateRow span { color: #66726c; }.updateRow del { color: #a07777; }.updateRow ins { color: #367657; text-decoration: none; font-weight: 700; }
 .transferPreview { margin-top: 15px; border: 1px solid #d9e7df; background: #f4f8f6; border-radius: 10px; padding: 12px; }
 .transferTitle { display: flex; align-items: center; justify-content: space-between; }.transferTitle label { color: #65736b; font-size: 8px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }.transferTitle span { background: #fff0d8; color: #8d5c19; padding: 4px 7px; border-radius: 20px; font-size: 8px; font-weight: 700; }
@@ -92,7 +108,7 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .transferPreview p { display: grid; grid-template-columns: 58px 1fr; gap: 7px; margin: 7px 0; color: #59675f; font-size: 8px; line-height: 1.45; }.transferPreview p strong { color: #2f5d47; }
 .copyFields { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 10px; }.copyFields span { display: flex; flex-direction: column; gap: 3px; background: white; border-radius: 6px; padding: 7px; color: #5f6b64; font-size: 8px; }.copyFields b { color: #87928c; font-size: 7px; }
 .confirm { display: flex; align-items: flex-start; gap: 8px; margin: 17px 0 10px; color: #59665f; font-size: 9px; line-height: 1.45; cursor: pointer; }.confirm input { margin-top: 1px; accent-color: var(--green); }
-.execute { width: 100%; border: 0; border-radius: 9px; background: var(--green); color: white; padding: 11px; font-weight: 700; font-size: 10px; cursor: pointer; }.execute:hover { background: var(--green-2); }
+.execute { width: 100%; border: 0; border-radius: 9px; background: var(--green); color: white; padding: 11px; font-weight: 700; font-size: 10px; cursor: pointer; }.execute:hover { background: var(--green-2); }.execute:disabled { cursor: wait; opacity: .65; }
 .safetyNote { margin: 8px 0 0; text-align: center; color: #8b9690; font-size: 8px; }
 .pageGrid { display: grid; grid-template-columns: minmax(390px,.9fr) minmax(430px,1.1fr); gap: 16px; align-items: start; }
 .mailSyncBar { display: grid; grid-template-columns: 42px 1fr auto; gap: 13px; align-items: center; margin-bottom: 14px; padding: 15px 17px; background: #edf5f0; border: 1px solid #d7e7dd; border-radius: 13px; }
