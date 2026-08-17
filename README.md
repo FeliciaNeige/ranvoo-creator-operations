@@ -41,6 +41,20 @@ npm run build
 npm test
 ```
 
+## Cloudflare 线上版本
+
+正式工作台：
+
+<https://ranvoo-felicia-workbench.felicia-ranvoo.workers.dev>
+
+线上版本使用 Cloudflare Workers 和 D1。生产密钥只保存在 Cloudflare，构建后会自动清理本地开发变量文件，避免凭证进入部署产物。
+
+```bash
+npm run build
+node scripts/upload-cloudflare-secrets.mjs https://ranvoo-felicia-workbench.felicia-ranvoo.workers.dev/api/auth/feishu/callback
+npx wrangler deploy
+```
+
 ## 安装 Skill
 
 将 `skills/ranvoo-creator-operations` 文件夹复制到 Codex 的 skills 目录，重新启动 Codex 后即可调用：
