@@ -20,23 +20,118 @@ type EmailRow = {
   snippet: string | null;
   body_text: string | null;
   direction: "inbound" | "outbound" | "unknown";
+  counterparty_email: string;
+  total_messages?: number;
+  total_threads?: number;
 };
+
+type CreatorStatRow = {
+  counterparty_email: string;
+  total_messages: number;
+  total_threads: number;
+};
+
+const ANALYSIS_PAGE_SIZE = 50;
+const RECENT_MESSAGES_PER_CREATOR = 6;
+const COUNTERPARTY_SQL = `
+  LOWER(TRIM(
+    CASE
+      WHEN direction = 'inbound' THEN sender_email
+      ELSE COALESCE(json_extract(recipients_json, '$[0].email'), sender_email)
+    END
+  ))
+`;
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const phase = new URL(request.url).searchParams.get("phase") ?? "full";
+    const searchParams = new URL(request.url).searchParams;
+    const phase = searchParams.get("phase") ?? "full";
+    const cursor = (searchParams.get("cursor") ?? "").trim().toLowerCase();
+    const requestedLimit = Number(searchParams.get("limit") ?? ANALYSIS_PAGE_SIZE);
+    const pageSize = Math.min(
+      75,
+      Math.max(10, Number.isFinite(requestedLimit) ? requestedLimit : ANALYSIS_PAGE_SIZE),
+    );
     const db = getMailDb();
     await ensureMailTables(db);
+
+    const statsResult = await db
+      .prepare(`
+        WITH normalized AS (
+          SELECT
+            ${COUNTERPARTY_SQL} AS counterparty_email,
+            thread_id,
+            message_id
+          FROM email_messages
+          WHERE review_status = 'active'
+        )
+        SELECT
+          counterparty_email,
+          COUNT(*) AS total_messages,
+          COUNT(DISTINCT COALESCE(thread_id, message_id)) AS total_threads
+        FROM normalized
+        WHERE counterparty_email > ?
+          AND counterparty_email LIKE '%@%.%'
+        GROUP BY counterparty_email
+        ORDER BY counterparty_email ASC
+        LIMIT ?
+      `)
+      .bind(cursor, pageSize + 1)
+      .all<CreatorStatRow>();
+    const hasMore = statsResult.results.length > pageSize;
+    const pageStats = statsResult.results.slice(0, pageSize);
+    const pageEmails = pageStats.map((row) => row.counterparty_email);
+    const nextCursor = hasMore
+      ? pageEmails[pageEmails.length - 1] ?? null
+      : null;
+
+    if (!pageEmails.length) {
+      return Response.json(
+        {
+          items: [],
+          sourceEmailCount: 0,
+          uniqueCreatorCount: 0,
+          deduplicatedCount: 0,
+          hasMore: false,
+          nextCursor: null,
+          baseError: null,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const placeholders = pageEmails.map(() => "?").join(",");
     const rows = await db
       .prepare(`
+        WITH normalized AS (
+          SELECT
+            message_id, thread_id, subject, sender_name, sender_email,
+            recipients_json, sent_at, snippet,
+            SUBSTR(body_text, 1, 1800) AS body_text,
+            direction,
+            COALESCE(sent_at, imported_at) AS sort_at,
+            ${COUNTERPARTY_SQL} AS counterparty_email
+          FROM email_messages
+          WHERE review_status = 'active'
+        ), ranked AS (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY counterparty_email
+              ORDER BY sort_at DESC, message_id DESC
+            ) AS recent_rank
+          FROM normalized
+          WHERE counterparty_email IN (${placeholders})
+        )
         SELECT
           message_id, thread_id, subject, sender_name, sender_email,
-          recipients_json, sent_at, snippet, body_text, direction
-        FROM email_messages
-        WHERE review_status = 'active'
-        ORDER BY COALESCE(sent_at, imported_at) ASC
-        LIMIT 20000
+          recipients_json, sent_at, snippet, body_text, direction,
+          counterparty_email
+        FROM ranked
+        WHERE recent_rank <= ?
+        ORDER BY counterparty_email ASC, sort_at ASC
       `)
+      .bind(...pageEmails, RECENT_MESSAGES_PER_CREATOR)
       .all<EmailRow>();
     const messages: AnalyzableEmail[] = rows.results.map((row) => ({
       messageId: row.message_id,
@@ -51,11 +146,43 @@ export async function POST(request: Request): Promise<Response> {
       direction: row.direction,
     }));
     const routingConfig = await loadRoutingConfig(db);
-    const analyses = analyzeCreatorThreads(messages, Date.now(), routingConfig);
-    const client = await createFeishuClient(request);
+    const statsByEmail = new Map(
+      pageStats.map((row) => [row.counterparty_email, row]),
+    );
+    const analyses = analyzeCreatorThreads(messages, Date.now(), routingConfig)
+      .map((analysis) => {
+        const stats = statsByEmail.get(analysis.email);
+        if (!stats) return analysis;
+        return {
+          ...analysis,
+          messageCount: stats.total_messages,
+          threadCount: stats.total_threads || 1,
+          evidence: [
+            `同一邮箱共 ${stats.total_messages} 封邮件、${stats.total_threads || 1} 个线程（最近 ${Math.min(stats.total_messages, RECENT_MESSAGES_PER_CREATOR)} 封用于本次判断）`,
+            ...analysis.evidence.slice(1),
+          ],
+        };
+      });
+
+    const totals = cursor
+      ? null
+      : await db
+          .prepare(`
+            WITH normalized AS (
+              SELECT ${COUNTERPARTY_SQL} AS counterparty_email
+              FROM email_messages
+              WHERE review_status = 'active'
+            )
+            SELECT
+              COUNT(*) AS source_email_count,
+              COUNT(DISTINCT counterparty_email) AS unique_creator_count
+            FROM normalized
+            WHERE counterparty_email LIKE '%@%.%'
+          `)
+          .first<{ source_email_count: number; unique_creator_count: number }>();
+
     if (phase === "email") {
       const headers = new Headers({ "Cache-Control": "no-store" });
-      if (client.setCookie) headers.set("Set-Cookie", client.setCookie);
       return Response.json(
         {
           items: analyses.map((analysis) => ({
@@ -75,14 +202,19 @@ export async function POST(request: Request): Promise<Response> {
             },
           })),
           summary: summarize(analyses),
-          sourceEmailCount: messages.length,
-          uniqueCreatorCount: analyses.length,
-          deduplicatedCount: Math.max(0, messages.length - analyses.length),
+          sourceEmailCount: totals?.source_email_count ?? null,
+          uniqueCreatorCount: totals?.unique_creator_count ?? null,
+          deduplicatedCount: totals
+            ? Math.max(0, totals.source_email_count - totals.unique_creator_count)
+            : null,
+          hasMore,
+          nextCursor,
           baseError: null,
         },
         { headers },
       );
     }
+    const client = await createFeishuClient(request);
     let baseError: string | null = null;
     let matches = new Map();
     try {
@@ -114,9 +246,13 @@ export async function POST(request: Request): Promise<Response> {
             },
         })),
         summary: summarize(analyses),
-        sourceEmailCount: messages.length,
-        uniqueCreatorCount: analyses.length,
-        deduplicatedCount: Math.max(0, messages.length - analyses.length),
+        sourceEmailCount: totals?.source_email_count ?? null,
+        uniqueCreatorCount: totals?.unique_creator_count ?? null,
+        deduplicatedCount: totals
+          ? Math.max(0, totals.source_email_count - totals.unique_creator_count)
+          : null,
+        hasMore,
+        nextCursor,
         baseError,
       },
       { headers },

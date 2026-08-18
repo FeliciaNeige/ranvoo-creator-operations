@@ -64,7 +64,7 @@ test("bundles an installable Codex skill", async () => {
   assert.match(messages, /Commercial creator message library/);
 });
 
-test("mail sync retries transient failures and reuses one refreshed session", async () => {
+test("mail sync retries transient failures and keeps each Worker batch small", async () => {
   const [page, shared, syncRoute] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/api/mail/_shared.ts", root), "utf8"),
@@ -77,7 +77,8 @@ test("mail sync retries transient failures and reuses one refreshed session", as
   assert.match(shared, /createAuthorizedMailClient/);
   assert.match(shared, /AbortSignal\.timeout\(20_000\)/);
   assert.match(syncRoute, /const mailClient = await createAuthorizedMailClient\(request\)/);
-  assert.match(syncRoute, /page_size: "10"/);
+  assert.match(syncRoute, /page_size: "3"/);
+  assert.match(syncRoute, /mapWithConcurrency\(ids, 1/);
 });
 
 test("creator detail panel scrolls and historical messages expose the full body", async () => {

@@ -74,7 +74,10 @@ export async function POST(request: Request): Promise<Response> {
     }
     const folder = folders[folderIndex];
     const query = new URLSearchParams({
-      page_size: "10",
+      // Keep each Worker invocation deliberately small. Some creator replies
+      // contain very long quoted histories and decoding ten of them together
+      // can exceed the Workers Free CPU allowance.
+      page_size: "3",
       folder_id: folder.id,
     });
     if (pageToken) query.set("page_token", pageToken);
@@ -100,12 +103,11 @@ export async function POST(request: Request): Promise<Response> {
 
     const messages = pageAlreadyKnown
       ? []
-      : await mapWithConcurrency(ids, 2, async (id) => {
+      : await mapWithConcurrency(ids, 1, async (id) => {
           const detail = await mailClient.request<MessageData>(
             `/mail/v1/user_mailboxes/me/messages/${encodeURIComponent(id)}?format=plain_text_full`,
           );
           const normalized = normalizeMessage(id, detail.data, folder);
-          await delay(160);
           return normalized;
         });
 
@@ -295,7 +297,13 @@ function normalizeMessage(id: string, value: MessageData, folder: Folder) {
     bodyHtml,
     labels,
     direction,
-    rawJson: JSON.stringify(raw),
+    // The normalized columns are authoritative. Keeping the entire raw mail
+    // object duplicates large bodies and wastes CPU on JSON serialization.
+    rawJson: JSON.stringify({
+      message_id: stringValue(raw.message_id) || id,
+      thread_id: stringValue(raw.thread_id) || null,
+      folder_id: folder.id,
+    }),
   };
 }
 

@@ -181,6 +181,8 @@ type MailSyncBatchResult = {
 const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const AUTO_SYNC_LOCK_KEY = "ranvoo-mail-sync-lock";
 const AUTO_SYNC_LOCK_TTL_MS = 2 * 60 * 1000;
+const ANALYSIS_LOCK_KEY = "ranvoo-analysis-lock";
+const ANALYSIS_LOCK_TTL_MS = 2 * 60 * 1000;
 const APPEARANCE_STORAGE_KEY = "ranvoo-appearance-preferences";
 const defaultAppearance: AppearancePreferences = {
   font: "modern",
@@ -722,6 +724,9 @@ export default function Home() {
     async () => {},
   );
   const syncRetryTimerRef = useRef<number | null>(null);
+  const analysisOwnerRef = useRef(
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   const mailThreadPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -874,24 +879,90 @@ export default function Home() {
       setNotice("请先连接飞书并完成邮件迁移，再运行真实邮箱分析。");
       return;
     }
+    const owner = analysisOwnerRef.current;
+    try {
+      const existing = JSON.parse(
+        window.localStorage.getItem(ANALYSIS_LOCK_KEY) || "null",
+      ) as { owner?: string; expiresAt?: number } | null;
+      if (
+        existing?.owner &&
+        existing.owner !== owner &&
+        (existing.expiresAt ?? 0) > Date.now()
+      ) {
+        setNotice("另一个已打开的工作台页面正在分析。为避免重复占用资源，请保留一个页面，稍后再试。");
+        return;
+      }
+    } catch {
+      window.localStorage.removeItem(ANALYSIS_LOCK_KEY);
+    }
+    window.localStorage.setItem(
+      ANALYSIS_LOCK_KEY,
+      JSON.stringify({ owner, expiresAt: Date.now() + ANALYSIS_LOCK_TTL_MS }),
+    );
+    const lockHeartbeat = window.setInterval(() => {
+      window.localStorage.setItem(
+        ANALYSIS_LOCK_KEY,
+        JSON.stringify({ owner, expiresAt: Date.now() + ANALYSIS_LOCK_TTL_MS }),
+      );
+    }, 20_000);
+
     setReanalyzing(true);
     setNotice("正在读取邮件：合作类型会先显示，随后继续匹配飞书总表进度…");
     try {
-      const emailResponse = await fetch("/api/operations/analyze?phase=email", {
-        method: "POST",
-        cache: "no-store",
-      });
-      const emailBody = await readJsonResponse<{
+      const fetchAnalysisPages = async (phase: "email" | "base") => {
+        let cursor = "";
+        let hasMore = true;
+        let page = 0;
+        let allItems: AnalysisApiItem[] = [];
+        let firstMeta: {
+          sourceEmailCount?: number | null;
+          uniqueCreatorCount?: number | null;
+          deduplicatedCount?: number | null;
+        } = {};
+        let baseError: string | null = null;
+        while (hasMore && page < 100) {
+          const params = new URLSearchParams({ phase, limit: "50" });
+          if (cursor) params.set("cursor", cursor);
+          const response = await fetch(`/api/operations/analyze?${params}`, {
+            method: "POST",
+            cache: "no-store",
+            signal: AbortSignal.timeout(60_000),
+          });
+          const body = await readJsonResponse<{
+            items?: AnalysisApiItem[];
+            sourceEmailCount?: number | null;
+            uniqueCreatorCount?: number | null;
+            deduplicatedCount?: number | null;
+            hasMore?: boolean;
+            nextCursor?: string | null;
+            baseError?: string | null;
+            error?: string;
+          }>(response, phase === "email" ? "邮箱分析失败。" : "飞书总表匹配失败。");
+          if (!response.ok) throw new Error(body.error || (phase === "email" ? "邮箱分析失败。" : "飞书总表匹配失败。"));
+          if (page === 0) {
+            firstMeta = body;
+          }
+          allItems = allItems.concat(body.items ?? []);
+          baseError = body.baseError || baseError;
+          hasMore = Boolean(body.hasMore && body.nextCursor);
+          cursor = body.nextCursor ?? "";
+          page += 1;
+          setNotice(
+            phase === "email"
+              ? `正在分批读取邮件，已整理 ${allItems.length}${firstMeta.uniqueCreatorCount ? ` / ${firstMeta.uniqueCreatorCount}` : ""} 个邮箱账号…`
+              : `正在分批匹配飞书总表，已完成 ${allItems.length}${firstMeta.uniqueCreatorCount ? ` / ${firstMeta.uniqueCreatorCount}` : ""} 个邮箱账号…`,
+          );
+        }
+        return { ...firstMeta, items: allItems, baseError };
+      };
+
+      const emailBody = await fetchAnalysisPages("email") as {
         items?: AnalysisApiItem[];
-        sourceEmailCount?: number;
-        uniqueCreatorCount?: number;
-        deduplicatedCount?: number;
+        sourceEmailCount?: number | null;
+        uniqueCreatorCount?: number | null;
+        deduplicatedCount?: number | null;
         baseError?: string | null;
-        error?: string;
-      }>(emailResponse, "邮箱分析失败。");
-      if (!emailResponse.ok) {
-        throw new Error(emailBody.error || "邮箱分析失败。");
-      }
+      };
       const items = emailBody.items ?? [];
       if (!items.length) {
         setNotice("没有可分析的真实邮件，请先进入“邮件线程”迁移邮箱内容。");
@@ -922,20 +993,13 @@ export default function Home() {
       );
 
       try {
-        const baseResponse = await fetch("/api/operations/analyze?phase=base", {
-          method: "POST",
-          cache: "no-store",
-          signal: AbortSignal.timeout(60_000),
-        });
-        const baseBody = await readJsonResponse<{
+        const baseBody = await fetchAnalysisPages("base") as {
           items?: AnalysisApiItem[];
-          sourceEmailCount?: number;
-          uniqueCreatorCount?: number;
-          deduplicatedCount?: number;
+          sourceEmailCount?: number | null;
+          uniqueCreatorCount?: number | null;
+          deduplicatedCount?: number | null;
           baseError?: string | null;
-          error?: string;
-        }>(baseResponse, "飞书总表匹配失败。");
-        if (!baseResponse.ok) throw new Error(baseBody.error || "飞书总表匹配失败。");
+        };
         const matchedCreators = (baseBody.items ?? []).map(toCreator);
         if (matchedCreators.length) setCreators(matchedCreators);
         setNotice(
@@ -964,6 +1028,17 @@ export default function Home() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "邮箱分析失败。");
     } finally {
+      window.clearInterval(lockHeartbeat);
+      try {
+        const existing = JSON.parse(
+          window.localStorage.getItem(ANALYSIS_LOCK_KEY) || "null",
+        ) as { owner?: string } | null;
+        if (existing?.owner === owner) {
+          window.localStorage.removeItem(ANALYSIS_LOCK_KEY);
+        }
+      } catch {
+        window.localStorage.removeItem(ANALYSIS_LOCK_KEY);
+      }
       setReanalyzing(false);
     }
   }
