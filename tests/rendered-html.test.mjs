@@ -114,6 +114,18 @@ test("mail thread composer previews an editable collaboration progress update", 
   assert.match(updateRoute, /更新时间/);
 });
 
+test("target-table transfer preview allows Felicia to edit collaboration progress", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
+
+  assert.match(page, /aria-label="目标表合作进度"/);
+  assert.match(page, /onTransferField\(item\.field, event\.target\.value\)/);
+  assert.match(page, /setApproved\(false\)/);
+  assert.match(styles, /editableTransferField input/);
+});
+
 test("uses preferred collaboration tables and exposes appearance controls", async () => {
   const [page, styles, routing, matchRoute] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),

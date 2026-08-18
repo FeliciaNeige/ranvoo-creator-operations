@@ -1588,6 +1588,22 @@ export default function Home() {
                 setScheduledAt(value);
                 setApproved(false);
               }}
+              onTransferField={(field, value) => {
+                setCreators((items) => items.map((creator) =>
+                  creator.id === selected.id && creator.transfer
+                    ? {
+                        ...creator,
+                        transfer: {
+                          ...creator.transfer,
+                          fields: creator.transfer.fields.map((item) =>
+                            item.field === field ? { ...item, value } : item,
+                          ),
+                        },
+                      }
+                    : creator,
+                ));
+                setApproved(false);
+              }}
               onExecute={requestExecution}
               onDisposition={(action) => void changeMailDisposition(
                 threadEmails.map((email) => email.message_id),
@@ -2055,6 +2071,7 @@ function Workspace({
   history, historyLoading,
   onFilter, onSearch, onChoose, onApprove, onEdit, onDraft,
   onDeliveryMode, onScheduledAt, onExecute, onDisposition, onNotice,
+  onTransferField,
 }: {
   visible: Creator[]; selected: Creator; filter: string; search: string;
   drafts: Record<number, string>; draftHtmls: Record<number, string>;
@@ -2066,6 +2083,7 @@ function Workspace({
   onEdit: (value: boolean) => void; onDraft: (value: string) => void;
   onDeliveryMode: (value: "now" | "schedule") => void;
   onScheduledAt: (value: string) => void; onExecute: () => void;
+  onTransferField: (field: string, value: string) => void;
   onDisposition: (action: "archive" | "trash") => void;
   onNotice: (value: string) => void;
 }) {
@@ -2193,7 +2211,29 @@ function Workspace({
             <div className="transferPath"><b>{selected.transfer.source}</b><i>→</i><b>{selected.transfer.target}</b></div>
             <p><strong>触发依据</strong>{selected.transfer.trigger}</p>
             <p><strong>查重结果</strong>{selected.transfer.match}</p>
-            <div className="copyFields">{selected.transfer.fields.map((item) => <span key={item.field}><b>{item.field}</b>{item.value}</span>)}</div>
+            <div className="copyFields">
+              {selected.transfer.fields.map((item) => item.field === "合作进度" ? (
+                <label className="editableTransferField" key={item.field}>
+                  <b>{item.field}</b>
+                  <input
+                    type="text"
+                    list={`transfer-stages-${selected.id}`}
+                    value={item.value}
+                    onChange={(event) => onTransferField(item.field, event.target.value)}
+                    aria-label="目标表合作进度"
+                    placeholder="输入或选择合作进度"
+                  />
+                  <small>可输入自定义状态，也可从列表选择</small>
+                  <datalist id={`transfer-stages-${selected.id}`}>
+                    {collaborationStageOptions.map((stage) => (
+                      <option key={stage} value={stage} />
+                    ))}
+                  </datalist>
+                </label>
+              ) : (
+                <span key={item.field}><b>{item.field}</b>{item.value}</span>
+              ))}
+            </div>
           </div>
         )}
         <label className="confirm"><input type="checkbox" checked={approved} onChange={(event) => onApprove(event.target.checked)} /><span>我已核对邮件正文及以上所有字段变更</span></label>

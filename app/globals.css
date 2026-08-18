@@ -112,6 +112,10 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .transferPath { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 9px; }.transferPath b { background: white; border: 1px solid #dbe6e0; border-radius: 6px; padding: 5px 7px; }.transferPath i { color: #488068; font-style: normal; }
 .transferPreview p { display: grid; grid-template-columns: 58px 1fr; gap: 7px; margin: 7px 0; color: #59675f; font-size: 8px; line-height: 1.45; }.transferPreview p strong { color: #2f5d47; }
 .copyFields { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 10px; }.copyFields span { display: flex; flex-direction: column; gap: 3px; background: white; border-radius: 6px; padding: 7px; color: #5f6b64; font-size: 8px; }.copyFields b { color: #87928c; font-size: 7px; }
+.copyFields .editableTransferField { display: flex; flex-direction: column; gap: 5px; background: white; border: 1px solid #c9ddd2; border-radius: 7px; padding: 7px; }
+.editableTransferField input { width: 100%; min-height: 34px; border: 1px solid #aacbbb; border-radius: 6px; padding: 7px 9px; background: #fbfdfc; color: #214936; font: inherit; font-size: 9px; font-weight: 700; outline: none; }
+.editableTransferField input:focus { border-color: var(--accent, #153d2e); box-shadow: 0 0 0 2px rgba(21, 61, 46, .1); }
+.editableTransferField small { color: #7b8981; font-size: 7px; font-weight: 500; }
 .confirm { display: flex; align-items: flex-start; gap: 8px; margin: 17px 0 10px; color: #59665f; font-size: 9px; line-height: 1.45; cursor: pointer; }.confirm input { margin-top: 1px; accent-color: var(--green); }
 .execute { width: 100%; border: 0; border-radius: 9px; background: var(--green); color: white; padding: 11px; font-weight: 700; font-size: 10px; cursor: pointer; }.execute:hover { background: var(--green-2); }.execute:disabled { cursor: wait; opacity: .65; }
 .safetyNote { margin: 8px 0 0; text-align: center; color: #8b9690; font-size: 8px; }
