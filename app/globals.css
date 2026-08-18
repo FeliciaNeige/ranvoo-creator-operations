@@ -16,7 +16,8 @@ body { margin: 0; background: var(--paper); color: var(--ink); font-family: Aria
 button, input, textarea, select { font: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(49,128,92,.25); outline-offset: 2px; }
 button:disabled { opacity: .55; cursor: not-allowed !important; }
-.shell { min-height: 100vh; display: grid; grid-template-columns: 240px 1fr; }
+.shell { min-height: 100vh; display: grid; grid-template-columns: 240px 1fr; background: var(--paper); font-family: var(--ui-font-family, Arial, "PingFang SC", "Microsoft YaHei", sans-serif); }
+.shell button, .shell input, .shell textarea, .shell select { font-family: inherit; }
 .sidebar { position: sticky; top: 0; height: 100vh; background: #112c22; color: white; padding: 28px 18px 22px; display: flex; flex-direction: column; z-index: 5; }
 .brand { border: 0; background: transparent; color: white; display: flex; align-items: center; gap: 12px; padding: 0 8px 30px; cursor: pointer; text-align: left; }
 .brandMark { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: #f0c36e; color: #173f30; font: 800 21px Georgia, serif; }
@@ -58,7 +59,7 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .metrics button small { grid-column: 2; margin-top: -6px; color: #96a098; font-size: 9px; }
 .metricIcon { width: 33px; height: 33px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; }
 .metricIcon.red { background:#fbe8e5; color:#b44a3f }.metricIcon.amber { background:#fff0d8; color:#a66d1b }.metricIcon.blue { background:#e4edf6; color:#416b95 }.metricIcon.gray { background:#eef0ef; color:#68746e }
-.workspace { display: grid; grid-template-columns: minmax(460px, 1.08fr) minmax(390px, .92fr); gap: 16px; align-items: start; }
+.workspace { display: grid; grid-template-columns: minmax(340px, .68fr) minmax(560px, 1.32fr); gap: 16px; align-items: start; }
 .queue, .detail, .panel { background: white; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 5px 18px rgba(25,43,34,.035); overflow: hidden; }
 .sectionHead, .panelHead { padding: 20px 21px 14px; display: flex; justify-content: space-between; align-items: center; gap: 18px; }
 .sectionHead h2, .detail h2, .panel h2 { margin: 0; font: 700 18px Georgia, "Songti SC", serif; }
@@ -114,7 +115,7 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .confirm { display: flex; align-items: flex-start; gap: 8px; margin: 17px 0 10px; color: #59665f; font-size: 9px; line-height: 1.45; cursor: pointer; }.confirm input { margin-top: 1px; accent-color: var(--green); }
 .execute { width: 100%; border: 0; border-radius: 9px; background: var(--green); color: white; padding: 11px; font-weight: 700; font-size: 10px; cursor: pointer; }.execute:hover { background: var(--green-2); }.execute:disabled { cursor: wait; opacity: .65; }
 .safetyNote { margin: 8px 0 0; text-align: center; color: #8b9690; font-size: 8px; }
-.pageGrid { display: grid; grid-template-columns: minmax(390px,.9fr) minmax(430px,1.1fr); gap: 16px; align-items: start; }
+.pageGrid { display: grid; grid-template-columns: minmax(330px,.62fr) minmax(590px,1.38fr); gap: 16px; align-items: start; }
 .mailWorkspaceGrid { height: calc(100dvh - 310px); min-height: 620px; align-items: stretch; overflow: hidden; }
 .mailListPanel { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .mailListPanel .panelHead { flex: none; }.mailListPanel .mailList { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }.mailListPanel .loadMore { flex: none; }
@@ -198,6 +199,17 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 button.tableRow { cursor: pointer; }.tableRow:not(.tableHeader):hover { background: #f7faf8; }.tableHeader { background: #fafbfa; color: #8a958f; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; }.creatorCell { display: flex; align-items: center; gap: 10px; }.creatorCell > span { display: flex; flex-direction: column; gap: 3px; }.creatorCell strong { color: var(--ink); }.creatorCell small { color: #8d9892; }.tablePill { position: static; justify-self: start; }
 .templateGrid { display: grid; grid-template-columns: repeat(2,minmax(280px,1fr)); gap: 16px; }.templateGrid article { background: white; border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: 0 5px 18px rgba(25,43,34,.035); }.templateGrid article > span { display: inline-block; color: #37644f; background: var(--mint); border-radius: 6px; padding: 5px 8px; font-size: 8px; }.templateGrid h2 { font: 700 17px Georgia,serif; margin: 14px 0 8px; }.templateGrid p { color: #66726c; font-size: 10px; line-height: 1.55; }.templateGrid article > div { background: #f7f9f8; border-radius: 9px; padding: 12px; margin: 16px 0; }.templateGrid small { color: #87928c; font-size: 8px; font-weight: 700; }.templateGrid ul { padding-left: 17px; margin: 8px 0 0; color: #536059; font-size: 9px; line-height: 1.7; }.templateGrid button { border: 0; background: var(--green); color: white; border-radius: 8px; padding: 9px 12px; cursor: pointer; font-size: 9px; }
 .settingsGrid { display: grid; gap: 12px; }.settingsGrid article { display: grid; grid-template-columns: 48px 1fr auto; gap: 15px; align-items: center; background: white; border: 1px solid var(--line); border-radius: 13px; padding: 18px 20px; }.settingIcon { width: 44px; height: 44px; border-radius: 11px; background: var(--mint); color: #315f49; display: grid; place-items: center; font: 700 16px Georgia,serif; }.settingsGrid h2 { margin: 0; font: 700 15px Georgia,serif; }.settingsGrid p { margin: 5px 0 0; color: #748078; font-size: 10px; }.settingsGrid article > strong { font-size: 9px; color: #397156; background: #e7f1ec; padding: 6px 9px; border-radius: 20px; }.settingsGrid article > button { border: 1px solid var(--line); background: white; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 9px; }
+.appearanceSettingsPanel { padding: 20px; border: 1px solid var(--line); border-radius: 13px; background: white; }
+.appearanceSettingsHead { display: grid; grid-template-columns: 48px 1fr auto; gap: 15px; align-items: center; }
+.appearanceSettingsHead > button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: white; color: #496057; cursor: pointer; font-size: 9px; font-weight: 700; }
+.appearanceControls { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-top: 17px; padding-top: 16px; border-top: 1px solid var(--line); }
+.appearanceControls > label { display: flex; flex-direction: column; gap: 7px; color: #64736b; font-size: 9px; font-weight: 700; }
+.appearanceControls label > b { color: #2f654b; }
+.appearanceControls select { width: 100%; border: 1px solid #d7e2db; border-radius: 8px; padding: 9px; background: #fbfdfc; color: #35483e; }
+.appearanceControls input[type="range"] { width: 100%; accent-color: var(--green); }
+.colorControl { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 5px 8px; border: 1px solid #d7e2db; border-radius: 8px; background: #fbfdfc; }
+.colorControl input[type="color"] { width: 34px; height: 26px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.colorControl code { color: #607067; font: 8px ui-monospace,monospace; }
 .routingSettingsPanel { padding: 20px; border: 1px solid #d6e4dc; border-radius: 14px; background: white; box-shadow: 0 5px 18px rgba(25,43,34,.035); }
 .routingSettingsHead { display: flex; align-items: center; justify-content: space-between; gap: 18px; }.routingSettingsHead > div:first-child { display: flex; align-items: center; gap: 12px; }.routingSettingsHead h2 { margin: 0; }.routingSettingsHead p { margin: 5px 0 0; }
 .routingActions { display: flex; gap: 7px; }.routingActions button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: white; color: #496057; cursor: pointer; font-size: 9px; font-weight: 700; }.routingActions .primary { color: white; background: var(--green); }
@@ -208,7 +220,7 @@ button.tableRow { cursor: pointer; }.tableRow:not(.tableHeader):hover { backgrou
 
 @media (max-width: 1050px) {
   .shell { grid-template-columns: 78px 1fr; }.sidebar { padding-inline: 11px; }.brandWords, .navItem { font-size: 0; }.brand { padding-inline: 8px; }.navItem { justify-content: center; }.navItem span { font-size: 15px; }.syncCard div, .connectButton, .profile div { display: none; }.profile { justify-content: center; }
-  .content { padding: 30px 24px; }.workspace, .pageGrid { grid-template-columns: 1fr; }.mailWorkspaceGrid { height: auto; min-height: 0; overflow: visible; }.mailListPanel, .mailWorkspaceGrid .threadPanel { max-height: 680px; }.detail { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; }.metrics { grid-template-columns: repeat(2,1fr); }.routingRuleGrid { grid-template-columns: 1fr; }
+  .content { padding: 30px 24px; }.workspace, .pageGrid { grid-template-columns: 1fr; }.mailWorkspaceGrid { height: auto; min-height: 0; overflow: visible; }.mailListPanel, .mailWorkspaceGrid .threadPanel { max-height: 680px; }.detail { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; }.metrics { grid-template-columns: repeat(2,1fr); }.routingRuleGrid { grid-template-columns: 1fr; }.appearanceControls { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 680px) {
   .shell { display: block; }.sidebar { position: sticky; width: 100%; height: auto; padding: 10px 14px; flex-direction: row; align-items: center; }.brand { padding: 0; }.brandMark { width: 34px; height: 34px; }.sidebar nav { flex-direction: row; margin-left: auto; gap: 2px; }.navItem { padding: 8px; }.sideBottom { display: none; }
@@ -218,4 +230,5 @@ button.tableRow { cursor: pointer; }.tableRow:not(.tableHeader):hover { backgrou
   .replyControls, .statusSource { grid-template-columns: 1fr 1fr; }
   .mailTableProgressEditor > label { grid-template-columns: 1fr; }.mailTableChangePreview > div { grid-template-columns: 1fr 1fr 12px 1fr; }
   .routingSettingsHead { align-items: flex-start; flex-direction: column; }.routingActions { width: 100%; }.routingActions button { flex: 1; }
+  .appearanceSettingsHead { grid-template-columns: 44px 1fr; }.appearanceSettingsHead > button { grid-column: 2; justify-self: start; }.appearanceControls { grid-template-columns: 1fr; }
 }

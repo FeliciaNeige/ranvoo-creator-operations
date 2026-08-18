@@ -131,9 +131,14 @@ export async function matchAnalysesToBase(
   const appToken = await resolveBaseAppToken(client);
 
   const tables = await listAllTables(client, appToken);
-  const requestedTableNames = new Set(
-    analyses.map((analysis) => analysis.sourceTable).filter(Boolean),
-  );
+  const tableRequests = new Map<string, Set<string>>();
+  for (const analysis of analyses) {
+    for (const tableName of candidateTableNames(analysis)) {
+      const emails = tableRequests.get(tableName) ?? new Set<string>();
+      emails.add(analysis.email);
+      tableRequests.set(tableName, emails);
+    }
+  }
   const recordsByTable = new Map<
     string,
     {
@@ -147,7 +152,7 @@ export async function matchAnalysesToBase(
   >();
 
   await Promise.all(
-    [...requestedTableNames].map(async (tableName) => {
+    [...tableRequests.entries()].map(async ([tableName, requestedEmails]) => {
       const table = tables.find((item) => item.name === tableName);
       if (!table) return;
       const fields = await listAllFields(client, appToken, table.table_id);
@@ -158,9 +163,7 @@ export async function matchAnalysesToBase(
           client,
           appToken,
           table.table_id,
-          analyses
-            .filter((analysis) => analysis.sourceTable === tableName)
-            .map((analysis) => analysis.email),
+          [...requestedEmails],
           fields,
         ),
       });
@@ -169,58 +172,88 @@ export async function matchAnalysesToBase(
 
   const result = new Map<string, BaseMatch>();
   for (const analysis of analyses) {
-    const tableName = analysis.sourceTable;
-    const table = tableName ? recordsByTable.get(tableName) : undefined;
-    if (!tableName || !table) {
+    const candidateNames = candidateTableNames(analysis);
+    const preferredName = analysis.preferredTable;
+    const sourceName = analysis.sourceTable;
+    const availableTables = candidateNames
+      .map((tableName) => ({ tableName, table: recordsByTable.get(tableName) }))
+      .filter((item): item is { tableName: string; table: NonNullable<typeof item.table> } =>
+        Boolean(item.table),
+      );
+    if (!candidateNames.length || !availableTables.length) {
       result.set(
         analysis.email,
-        unavailableMatch(tableName, table?.tableId ?? null),
+        unavailableMatch(sourceName, null),
       );
       continue;
     }
-    const matches = table.records.filter((record) =>
-      recordContainsEmail(record.fields, analysis.email),
-    );
-    if (matches.length === 0) {
+
+    const matchesByTable = availableTables.map(({ tableName, table }) => ({
+      tableName,
+      table,
+      matches: table.records.filter((record) =>
+        recordContainsEmail(record.fields, analysis.email),
+      ),
+    }));
+    const preferred = matchesByTable.find((item) => item.tableName === preferredName);
+    const source = matchesByTable.find((item) => item.tableName === sourceName);
+    const selected = preferred?.matches.length ? preferred : source?.matches.length ? source : undefined;
+
+    if (!selected) {
       result.set(analysis.email, {
         status: "unmatched",
-        tableName,
-        tableId: table.tableId,
+        tableName: preferredName ?? sourceName ?? candidateNames[0],
+        tableId: preferred?.table.tableId ?? source?.table.tableId ?? availableTables[0].table.tableId,
         recordId: null,
         duplicateRecordIds: [],
         currentStage: null,
         proposedChanges: [],
         unresolvedFields: [],
-        message: `在 ${tableName} 中没有找到邮箱 ${analysis.email}`,
+        message: `在 ${candidateNames.join("、")} 中均未找到邮箱 ${analysis.email}`,
       });
       continue;
     }
-    if (matches.length > 1) {
+    if (selected.matches.length > 1) {
       result.set(analysis.email, {
         status: "duplicate",
-        tableName,
-        tableId: table.tableId,
+        tableName: selected.tableName,
+        tableId: selected.table.tableId,
         recordId: null,
-        duplicateRecordIds: matches.map((record) => record.record_id),
+        duplicateRecordIds: selected.matches.map((record) => record.record_id),
         currentStage: null,
         proposedChanges: [],
         unresolvedFields: [],
-        message: `在 ${tableName} 中找到 ${matches.length} 条同邮箱记录，需要人工确认`,
+        message: `在 ${selected.tableName} 中找到 ${selected.matches.length} 条同邮箱记录，需要人工确认`,
       });
       continue;
     }
-    result.set(
-      analysis.email,
-      buildMatchedPreview(
-        tableName,
-        table.tableId,
-        matches[0],
-        analysis,
-        table.fieldNames,
-      ),
+    const match = buildMatchedPreview(
+      selected.tableName,
+      selected.table.tableId,
+      selected.matches[0],
+      analysis,
+      selected.table.fieldNames,
     );
+    const alsoInSource = Boolean(
+      preferredName &&
+      selected.tableName === preferredName &&
+      source?.matches.length,
+    );
+    match.message = alsoInSource
+      ? `同邮箱同时存在于 ${sourceName} 和 ${preferredName}；已按规则以 ${preferredName} 为准，发送后也只更新该表`
+      : selected.tableName === preferredName
+        ? `已按邮箱匹配到优先合作表 ${preferredName}；发送后只更新该表`
+        : `合作表未找到该邮箱，当前按邮箱匹配到 ${selected.tableName}`;
+    result.set(analysis.email, match);
   }
   return result;
+}
+
+function candidateTableNames(analysis: CreatorThreadAnalysis): string[] {
+  return [...new Set([
+    analysis.sourceTable,
+    analysis.preferredTable,
+  ].filter((value): value is string => Boolean(value)))];
 }
 
 export async function resolveBaseAppToken(
@@ -388,6 +421,19 @@ async function searchRecordsForEmails(
   fields: NonNullable<FieldListData["items"]>,
 ) {
   if (!emails.length) return [];
+  const uniqueEmails = [...new Set(emails.map((email) => email.toLowerCase()))];
+  if (uniqueEmails.length > 40) {
+    const requested = new Set(uniqueEmails);
+    const allRecords = await listAllRecords(client, appToken, tableId);
+    return allRecords.filter((record) =>
+      collectStrings(record.fields).some((value) => {
+        const candidates = value.toLowerCase().match(/[^\s<>,;]+@[^\s<>,;]+/g) ?? [];
+        return candidates.some((candidate) =>
+          requested.has(candidate.replace(/[).]+$/, "").toLowerCase()),
+        );
+      }),
+    );
+  }
   const emailFields = fields.filter((field) =>
     field.ui_type === "Email" ||
     /email|e-mail|邮箱|邮件|联系|contact/i.test(field.field_name),
@@ -397,7 +443,6 @@ async function searchRecordsForEmails(
   }
 
   const records = new Map<string, { record_id: string; fields: Record<string, unknown> }>();
-  const uniqueEmails = [...new Set(emails.map((email) => email.toLowerCase()))];
   const fieldsPerEmail = Math.max(1, emailFields.length);
   const chunkSize = Math.max(1, Math.min(20, Math.floor(45 / fieldsPerEmail)));
   for (let index = 0; index < uniqueEmails.length; index += chunkSize) {

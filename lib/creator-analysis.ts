@@ -36,6 +36,7 @@ export type CreatorThreadAnalysis = {
   category: CollaborationCategory;
   categoryLabel: string;
   sourceTable: string | null;
+  preferredTable: string | null;
   targetTable: string | null;
   messageCount: number;
   threadCount: number;
@@ -59,12 +60,6 @@ export type CreatorThreadAnalysis = {
     reason: string;
   }[];
   transferEligible: boolean;
-};
-
-const targetTables: Record<Exclude<CollaborationCategory, "未分类">, string> = {
-  UGC: "UGC合作",
-  牙医合作: "🪥牙医合作",
-  商业化红人: "🪥合作红人（26年4月后",
 };
 
 export function analyzeCreatorThreads(
@@ -119,7 +114,9 @@ function analyzeGroup(
   const sourceTable = category === "未分类"
     ? null
     : matchedRule?.sourceTable ?? null;
-  const targetTable = category === "未分类" ? null : targetTables[category];
+  const preferredTable = category === "未分类"
+    ? null
+    : matchedRule?.preferredTable ?? null;
   const lastInboundAt = latestInbound?.sentAt ?? null;
   const lastOutboundAt = latestOutbound?.sentAt ?? null;
   const waitingForCreator =
@@ -178,7 +175,8 @@ function analyzeGroup(
     category,
     categoryLabel: matchedRule?.label ?? "类型待确认",
     sourceTable,
-    targetTable: transferEligible ? targetTable : null,
+    preferredTable,
+    targetTable: transferEligible ? preferredTable : null,
     messageCount: ordered.length,
     threadCount:
       new Set(ordered.map((message) => message.threadId).filter(Boolean)).size ||

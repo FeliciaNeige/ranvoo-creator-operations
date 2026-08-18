@@ -26,6 +26,14 @@ Normalize whitespace, case, reply prefixes, and minor punctuation. If the title 
 
 If multiple records match, do not update until the user chooses.
 
+### Dual-table status priority
+
+- UGC: `UGC👖` → preferred `UGC合作`.
+- Commercial creator: `牙刷红人👖` → preferred `🪥合作红人（26年4月后`.
+- Dental professional: `专业人员👖` → preferred `🪥牙医合作`.
+
+Search both tables by the same normalized creator email. If the email exists in both, use the preferred collaboration table's `合作进度` as the current status. Any approved progress or date update must write only to that preferred collaboration-table record; never modify the source-table record. If the preferred table has no matching email, fall back to the source-table record. Duplicate matches inside the selected table still require manual resolution before writing.
+
 Discover the live schema before editing. Typical fields include stage, 更新日期, last inbound/outbound date, follow-up count, next action, due date, platform, deliverables, price, contract, logistics, Brief, content, posting, payment, and concise factual notes.
 
 Whenever stage/current progress changes, set `更新日期` to the current date in Asia/Shanghai. Do not refresh it for read-only review or an unchanged progress value.

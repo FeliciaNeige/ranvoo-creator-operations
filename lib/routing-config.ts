@@ -4,6 +4,7 @@ export type RoutingRule = {
   category: EditableCreatorCategory;
   label: string;
   sourceTable: string;
+  preferredTable: string;
   subjectKeywords: string[];
   bodyKeywords: string[];
 };
@@ -18,6 +19,7 @@ export const defaultRoutingConfig: RoutingConfig = {
       category: "UGC",
       label: "UGC 红人",
       sourceTable: "UGC👖",
+      preferredTable: "UGC合作",
       subjectKeywords: [
         "paid ugc collab with ranvoo",
         "felicia from wlive",
@@ -30,6 +32,7 @@ export const defaultRoutingConfig: RoutingConfig = {
       category: "牙医合作",
       label: "牙医 / 专业人员",
       sourceTable: "专业人员👖",
+      preferredTable: "🪥牙医合作",
       subjectKeywords: [
         "next-gen electric toothbrush",
         "next-gen electric toothbrush for professionals to test",
@@ -50,6 +53,7 @@ export const defaultRoutingConfig: RoutingConfig = {
       category: "商业化红人",
       label: "商业化红人",
       sourceTable: "牙刷红人👖",
+      preferredTable: "🪥合作红人（26年4月后",
       subjectKeywords: [
         "paid instagram collab with ranvoo",
         "helping moms make self-care easier",
@@ -80,6 +84,8 @@ export function normalizeRoutingConfig(value: unknown): RoutingConfig {
       label: cleanText(item.label, 40) || defaultRule(item.category).label,
       sourceTable:
         cleanText(item.sourceTable, 80) || defaultRule(item.category).sourceTable,
+      preferredTable:
+        cleanText(item.preferredTable, 80) || defaultRule(item.category).preferredTable,
       subjectKeywords: cleanKeywords(item.subjectKeywords),
       bodyKeywords: cleanKeywords(item.bodyKeywords),
     });

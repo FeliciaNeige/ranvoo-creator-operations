@@ -112,3 +112,22 @@ test("mail thread composer previews an editable collaboration progress update", 
   assert.match(updateRoute, /isUpdateDateField\(field\)/);
   assert.match(updateRoute, /更新时间/);
 });
+
+test("uses preferred collaboration tables and exposes appearance controls", async () => {
+  const [page, styles, routing, matchRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+    readFile(new URL("lib/routing-config.ts", root), "utf8"),
+    readFile(new URL("app/api/operations/_shared.ts", root), "utf8"),
+  ]);
+
+  assert.match(routing, /preferredTable: "UGC合作"/);
+  assert.match(routing, /preferredTable: "🪥牙医合作"/);
+  assert.match(routing, /preferredTable: "🪥合作红人（26年4月后"/);
+  assert.match(matchRoute, /selected\.tableName === preferredName/);
+  assert.match(matchRoute, /发送后也只更新该表/);
+  assert.match(page, /页面显示与阅读偏好/);
+  assert.match(page, /APPEARANCE_STORAGE_KEY/);
+  assert.match(page, /优先合作表名称/);
+  assert.match(styles, /grid-template-columns: minmax\(330px,\.62fr\) minmax\(590px,1\.38fr\)/);
+});

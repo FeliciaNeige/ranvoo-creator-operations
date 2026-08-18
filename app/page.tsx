@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   htmlToPlainText,
   plainTextToHtml,
@@ -14,6 +15,13 @@ import {
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
 type Category = "UGC" | "牙医合作" | "商业化红人" | "未分类";
 type View = "dashboard" | "mail" | "creators" | "messages" | "settings";
+
+type AppearancePreferences = {
+  font: "modern" | "rounded" | "serif";
+  scale: number;
+  accent: string;
+  background: string;
+};
 
 type Creator = {
   id: number;
@@ -72,6 +80,7 @@ type AnalysisApiItem = {
   category: Category;
   categoryLabel: string;
   sourceTable: string | null;
+  preferredTable: string | null;
   targetTable: string | null;
   messageCount: number;
   threadCount: number;
@@ -172,6 +181,18 @@ type MailSyncBatchResult = {
 const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const AUTO_SYNC_LOCK_KEY = "ranvoo-mail-sync-lock";
 const AUTO_SYNC_LOCK_TTL_MS = 2 * 60 * 1000;
+const APPEARANCE_STORAGE_KEY = "ranvoo-appearance-preferences";
+const defaultAppearance: AppearancePreferences = {
+  font: "modern",
+  scale: 1,
+  accent: "#153d2e",
+  background: "#f5f7f5",
+};
+const appearanceFonts: Record<AppearancePreferences["font"], string> = {
+  modern: 'Arial, "PingFang SC", "Microsoft YaHei", sans-serif',
+  rounded: '"Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif',
+  serif: 'Georgia, "Songti SC", "STSong", serif',
+};
 
 const todayLabel = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -680,6 +701,8 @@ export default function Home() {
   );
   const [routingLoaded, setRoutingLoaded] = useState(false);
   const [routingSaving, setRoutingSaving] = useState(false);
+  const [appearance, setAppearance] = useState<AppearancePreferences>(defaultAppearance);
+  const [appearanceLoaded, setAppearanceLoaded] = useState(false);
   const [importedEmails, setImportedEmails] = useState<ImportedEmail[]>([]);
   const [mailSync, setMailSync] = useState<MailSync>({
     total_imported: 0,
@@ -728,6 +751,40 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(restorePreference);
   }, []);
+
+  useEffect(() => {
+    const restoreAppearance = window.setTimeout(() => {
+      const saved = window.localStorage.getItem(APPEARANCE_STORAGE_KEY);
+      if (saved) {
+        try {
+          const candidate = JSON.parse(saved) as Partial<AppearancePreferences>;
+          setAppearance({
+            font: candidate.font && candidate.font in appearanceFonts
+              ? candidate.font
+              : defaultAppearance.font,
+            scale: typeof candidate.scale === "number"
+              ? Math.min(1.25, Math.max(0.85, candidate.scale))
+              : defaultAppearance.scale,
+            accent: /^#[0-9a-f]{6}$/i.test(candidate.accent ?? "")
+              ? candidate.accent!
+              : defaultAppearance.accent,
+            background: /^#[0-9a-f]{6}$/i.test(candidate.background ?? "")
+              ? candidate.background!
+              : defaultAppearance.background,
+          });
+        } catch {
+          setAppearance(defaultAppearance);
+        }
+      }
+      setAppearanceLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(restoreAppearance);
+  }, []);
+
+  useEffect(() => {
+    if (!appearanceLoaded) return;
+    window.localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance));
+  }, [appearance, appearanceLoaded]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -929,7 +986,7 @@ export default function Home() {
 
   function updateRoutingRule(
     index: number,
-    field: "label" | "sourceTable" | "subjectKeywords" | "bodyKeywords",
+    field: "label" | "sourceTable" | "preferredTable" | "subjectKeywords" | "bodyKeywords",
     value: string,
   ) {
     setRoutingConfig((current) => ({
@@ -1358,8 +1415,19 @@ export default function Home() {
     view === "mail" ? "邮件线程与跟进判断" :
     view === "creators" ? "红人合作总览" :
     view === "messages" ? "达人建联话术中心" : "工作流与安全设置";
+  const shellStyle = {
+    "--green": appearance.accent,
+    "--green-2": `color-mix(in srgb, ${appearance.accent} 82%, white)`,
+    "--paper": appearance.background,
+    "--ui-font-family": appearanceFonts[appearance.font],
+  } as CSSProperties;
+  const contentScaleStyle = {
+    zoom: appearance.scale,
+    width: `${100 / appearance.scale}%`,
+    minHeight: `${100 / appearance.scale}vh`,
+  } as CSSProperties;
   return (
-    <main className="shell">
+    <main className="shell" style={shellStyle}>
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("dashboard")} aria-label="返回今日工作台">
           <span className="brandMark">R</span>
@@ -1395,7 +1463,7 @@ export default function Home() {
         </div>
       </aside>
 
-      <section className="content">
+      <section className="content" style={contentScaleStyle}>
         <header className="topbar">
           <div>
             <p className="eyebrow">RANVOO CREATOR OPERATIONS · {viewNames[view]}</p>
@@ -1677,6 +1745,40 @@ export default function Home() {
 
         {view === "settings" && (
           <section className="settingsGrid">
+            <section className="appearanceSettingsPanel">
+              <div className="appearanceSettingsHead">
+                <span className="settingIcon">Aa</span>
+                <div>
+                  <h2>页面显示与阅读偏好</h2>
+                  <p>调整字体、整体显示大小和主题颜色；设置只保存在当前浏览器。</p>
+                </div>
+                <button type="button" onClick={() => setAppearance(defaultAppearance)}>恢复默认</button>
+              </div>
+              <div className="appearanceControls">
+                <label>页面字体
+                  <select value={appearance.font} onChange={(event) => setAppearance((current) => ({
+                    ...current,
+                    font: event.target.value as AppearancePreferences["font"],
+                  }))}>
+                    <option value="modern">清晰现代</option>
+                    <option value="rounded">柔和圆体</option>
+                    <option value="serif">经典衬线</option>
+                  </select>
+                </label>
+                <label>显示大小 <b>{Math.round(appearance.scale * 100)}%</b>
+                  <input type="range" min="85" max="125" step="5" value={Math.round(appearance.scale * 100)} onChange={(event) => setAppearance((current) => ({
+                    ...current,
+                    scale: Number(event.target.value) / 100,
+                  }))} />
+                </label>
+                <label>主色
+                  <span className="colorControl"><input type="color" value={appearance.accent} onChange={(event) => setAppearance((current) => ({ ...current, accent: event.target.value }))} /><code>{appearance.accent}</code></span>
+                </label>
+                <label>页面底色
+                  <span className="colorControl"><input type="color" value={appearance.background} onChange={(event) => setAppearance((current) => ({ ...current, background: event.target.value }))} /><code>{appearance.background}</code></span>
+                </label>
+              </div>
+            </section>
             <section className="routingSettingsPanel">
               <div className="routingSettingsHead">
                 <div>
@@ -1703,6 +1805,9 @@ export default function Home() {
                     <label>对应来源表名称
                       <input value={rule.sourceTable} onChange={(event) => updateRoutingRule(index, "sourceTable", event.target.value)} />
                     </label>
+                    <label>优先合作表名称
+                      <input value={rule.preferredTable} onChange={(event) => updateRoutingRule(index, "preferredTable", event.target.value)} />
+                    </label>
                     <label>邮件标题关键词（优先）
                       <textarea value={rule.subjectKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "subjectKeywords", event.target.value)} />
                     </label>
@@ -1712,7 +1817,7 @@ export default function Home() {
                   </article>
                 ))}
               </div>
-              <p className="routingHelp">新增一种称呼或红人细分类型时，可修改“网页显示名称”并添加对应关键词；如果未来需要全新的第四条合作流程，再单独新增主流程，避免误写现有三张表。</p>
+              <p className="routingHelp">同邮箱同时出现在来源表与优先合作表时，以优先合作表的合作进度为准，发送后也只更新优先合作表。新增称呼或细分类型时，可修改显示名称、两张表名和关键词。</p>
             </section>
             <article><span className="settingIcon">3</span><div><h2>跟进提醒</h2><p>最后一封发出邮件满3个完整自然日且无回复时进入“需要跟进”。</p></div><strong>已启用</strong></article>
             <article><span className="settingIcon">30</span><div><h2>终止候选</h2><p>超过30天无回复只标记为候选，不会自动终止或发送收尾邮件。</p></div><strong>需人工确认</strong></article>

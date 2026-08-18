@@ -96,4 +96,5 @@ test("commercial subject wins over dental words quoted in the email body", () =>
   assert.equal(result.category, "商业化红人");
   assert.equal(result.categoryLabel, "商业化红人");
   assert.equal(result.sourceTable, "牙刷红人👖");
+  assert.equal(result.preferredTable, "🪥合作红人（26年4月后");
 });
