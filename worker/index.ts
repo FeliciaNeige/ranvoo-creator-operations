@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 
-const SHELL_CACHE_VERSION = "2026-08-19-editable-transfer-v2";
+const SHELL_CACHE_VERSION = "2026-08-19-mail-send-progress-edit-v3";
 
 interface Env {
   ASSETS: Fetcher;

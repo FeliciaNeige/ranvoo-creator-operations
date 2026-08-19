@@ -9,6 +9,7 @@ import {
   sanitizeMailHtml,
   toBase64Url,
 } from "../../../../lib/mail-compose";
+import { extractFeishuDraftId } from "../../../../lib/feishu-mail";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export async function POST(request: Request): Promise<Response> {
       "/mail/v1/user_mailboxes/me/drafts",
       { method: "POST", body: { raw } },
     );
-    const draftId = stringValue(created.data.draft_id) || stringValue(asRecord(created.data.draft)?.draft_id);
+    const draftId = extractFeishuDraftId(created.data);
     if (!draftId) throw new MailApiError(502, "飞书草稿已创建，但未返回草稿编号；为避免重复发送，操作已停止。");
 
     const sent = await mailClient.request<FeishuRecord>(

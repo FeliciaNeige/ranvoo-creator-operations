@@ -5,6 +5,7 @@ import {
   htmlToPlainText,
   sanitizeMailHtml,
 } from "../lib/mail-compose.ts";
+import { extractFeishuDraftId } from "../lib/feishu-mail.ts";
 
 test("mail html keeps supported formatting and removes unsafe content", () => {
   const html = sanitizeMailHtml(
@@ -39,4 +40,18 @@ test("EML includes rich and plain alternatives plus reply headers", () => {
   assert.match(eml, /In-Reply-To: <smtp@example\.com>/);
   assert.match(eml, /X-LMS-Reply-To-Message-Id: lark-message-id/);
   assert.doesNotMatch(eml, /\r/);
+});
+
+test("Feishu draft id parser accepts current and legacy response shapes", () => {
+  assert.equal(extractFeishuDraftId({ draft_id: "draft-one" }), "draft-one");
+  assert.equal(extractFeishuDraftId({ id: "draft-two" }), "draft-two");
+  assert.equal(
+    extractFeishuDraftId({ draft: { draft_id: "draft-three" } }),
+    "draft-three",
+  );
+  assert.equal(
+    extractFeishuDraftId({ draft: { id: "draft-four" } }),
+    "draft-four",
+  );
+  assert.equal(extractFeishuDraftId({ message_id: "not-a-draft" }), "");
 });

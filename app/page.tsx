@@ -2357,14 +2357,15 @@ function MailReplyComposer({
     tableAnalysis.tableId &&
     tableAnalysis.recordId,
   );
-  const canEditProgress = Boolean(
+  const canChooseProgress = Boolean(canUpdateTableRecord);
+  const canSyncProgress = Boolean(
     canUpdateTableRecord &&
     tableAnalysis?.progressField &&
     tableAnalysis.updateDateField,
   );
   const normalizedProgress = progressValue.trim();
   const progressChanged = Boolean(
-    canEditProgress &&
+    canSyncProgress &&
     normalizedProgress &&
     normalizedProgress !== (tableAnalysis?.tableStage ?? ""),
   );
@@ -2559,7 +2560,7 @@ function MailReplyComposer({
             type="text"
             list={`collaboration-stages-${email.message_id}`}
             value={progressValue}
-            disabled={!canEditProgress || mode === "schedule"}
+            disabled={!canChooseProgress || mode === "schedule"}
             onChange={(event) => {
               setProgressValue(event.target.value);
               setSyncTable(true);
@@ -2572,7 +2573,17 @@ function MailReplyComposer({
           </datalist>
         </label>
         {!canUpdateTableRecord && <p>只有唯一匹配到飞书记录后才能修改合作进度。</p>}
-        {canUpdateTableRecord && !canEditProgress && <p>对应表缺少“合作进度”或“更新日期”字段，请先检查表结构。</p>}
+        {canUpdateTableRecord && !canSyncProgress && (
+          <p>
+            你可以编辑发送后的目标进度；但当前未识别到
+            {!tableAnalysis?.progressField && !tableAnalysis?.updateDateField
+              ? "“合作进度”和“更新日期”"
+              : !tableAnalysis?.progressField
+                ? "“合作进度”"
+                : "“更新日期”"}
+            字段，所以本次发送不会自动写入多维表。
+          </p>
+        )}
         {mode === "schedule" && <p>定时邮件不会提前修改合作进度；切换为“立即发送”后可同步更新。</p>}
         {syncTable && tableChanges.length > 0 && mode === "now" && (
           <div className="mailTableChangePreview">

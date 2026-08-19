@@ -103,6 +103,8 @@ test("mail thread composer previews an editable collaboration progress update", 
   ]);
 
   assert.match(page, /发送后的合作进度/);
+  assert.match(page, /disabled=\{!canChooseProgress \|\| mode === "schedule"\}/);
+  assert.match(page, /你可以编辑发送后的目标进度/);
   assert.match(page, /mailTableChangePreview/);
   assert.match(page, /changes: tableChanges/);
   assert.match(page, /setConfirmed\(false\)/);
