@@ -1069,11 +1069,19 @@ export default function Home() {
         ? {
             ...rule,
             [field]: field.endsWith("Keywords")
-              ? value.split("\n").map((item) => item.trim()).filter(Boolean)
+              ? value.split("\n")
               : value,
           }
         : rule),
     }));
+  }
+
+  function appendRoutingKeywordLine(
+    index: number,
+    field: "subjectKeywords" | "bodyKeywords",
+  ) {
+    const current = routingConfig.rules[index]?.[field].join("\n") ?? "";
+    updateRoutingRule(index, field, `${current}\n`);
   }
 
   async function saveRoutingSettings() {
@@ -1495,6 +1503,7 @@ export default function Home() {
     "--green-2": `color-mix(in srgb, ${appearance.accent} 82%, white)`,
     "--paper": appearance.background,
     "--ui-font-family": appearanceFonts[appearance.font],
+    "--ui-scale": appearance.scale,
   } as CSSProperties;
   const contentScaleStyle = {
     zoom: appearance.scale,
@@ -1502,7 +1511,10 @@ export default function Home() {
     minHeight: `${100 / appearance.scale}vh`,
   } as CSSProperties;
   return (
-    <main className="shell" style={shellStyle}>
+    <main
+      className={`shell ${appearance.scale === 1 ? "" : "customDisplayScale"}`}
+      style={shellStyle}
+    >
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("dashboard")} aria-label="返回今日工作台">
           <span className="brandMark">R</span>
@@ -1889,22 +1901,37 @@ export default function Home() {
               <div className="routingRuleGrid">
                 {routingConfig.rules.map((rule, index) => (
                   <article className="routingRuleCard" key={rule.category}>
-                    <strong>{rule.category}</strong>
-                    <label>网页显示名称
-                      <input value={rule.label} onChange={(event) => updateRoutingRule(index, "label", event.target.value)} />
-                    </label>
-                    <label>对应来源表名称
-                      <input value={rule.sourceTable} onChange={(event) => updateRoutingRule(index, "sourceTable", event.target.value)} />
-                    </label>
-                    <label>优先合作表名称
-                      <input value={rule.preferredTable} onChange={(event) => updateRoutingRule(index, "preferredTable", event.target.value)} />
-                    </label>
-                    <label>邮件标题关键词（优先）
-                      <textarea value={rule.subjectKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "subjectKeywords", event.target.value)} />
-                    </label>
-                    <label>正文/职业关键词（兜底）
-                      <textarea value={rule.bodyKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "bodyKeywords", event.target.value)} />
-                    </label>
+                    <div className="routingRuleCardHead">
+                      <strong>{rule.category}</strong>
+                      <small>每行一个关键词，允许先留空；保存时自动去重和清理空行。</small>
+                    </div>
+                    <div className="routingTableFields">
+                      <label>网页显示名称
+                        <input value={rule.label} onChange={(event) => updateRoutingRule(index, "label", event.target.value)} />
+                      </label>
+                      <label>对应来源表名称
+                        <input value={rule.sourceTable} onChange={(event) => updateRoutingRule(index, "sourceTable", event.target.value)} />
+                      </label>
+                      <label>优先合作表名称
+                        <input value={rule.preferredTable} onChange={(event) => updateRoutingRule(index, "preferredTable", event.target.value)} />
+                      </label>
+                    </div>
+                    <div className="routingKeywordFields">
+                      <label>邮件标题关键词（优先）
+                        <textarea rows={7} value={rule.subjectKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "subjectKeywords", event.target.value)} />
+                        <span className="keywordEditorFoot">
+                          <small>{rule.subjectKeywords.filter((item) => item.trim()).length} 条关键词</small>
+                          <button type="button" onClick={() => appendRoutingKeywordLine(index, "subjectKeywords")}>＋另起一行</button>
+                        </span>
+                      </label>
+                      <label>正文/职业关键词（兜底）
+                        <textarea rows={7} value={rule.bodyKeywords.join("\n")} onChange={(event) => updateRoutingRule(index, "bodyKeywords", event.target.value)} />
+                        <span className="keywordEditorFoot">
+                          <small>{rule.bodyKeywords.filter((item) => item.trim()).length} 条关键词</small>
+                          <button type="button" onClick={() => appendRoutingKeywordLine(index, "bodyKeywords")}>＋另起一行</button>
+                        </span>
+                      </label>
+                    </div>
                   </article>
                 ))}
               </div>

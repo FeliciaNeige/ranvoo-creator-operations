@@ -144,5 +144,10 @@ test("uses preferred collaboration tables and exposes appearance controls", asyn
   assert.match(page, /页面显示与阅读偏好/);
   assert.match(page, /APPEARANCE_STORAGE_KEY/);
   assert.match(page, /优先合作表名称/);
+  assert.match(page, /customDisplayScale/);
+  assert.match(page, /appendRoutingKeywordLine/);
+  assert.match(page, /＋另起一行/);
   assert.match(styles, /grid-template-columns: minmax\(330px,\.62fr\) minmax\(590px,1\.38fr\)/);
+  assert.match(styles, /customDisplayScale \.mailWorkspaceGrid/);
+  assert.match(styles, /routingKeywordFields/);
 });

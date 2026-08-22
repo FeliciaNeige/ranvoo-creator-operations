@@ -12,7 +12,8 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
+html, body { min-height: 100%; }
+body { margin: 0; overflow-x: hidden; background: var(--paper); color: var(--ink); font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
 button, input, textarea, select { font: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(49,128,92,.25); outline-offset: 2px; }
 button:disabled { opacity: .55; cursor: not-allowed !important; }
@@ -41,6 +42,11 @@ nav { display: flex; flex-direction: column; gap: 6px; }
 .profile div { display: flex; flex-direction: column; gap: 3px; }
 .profile strong { font-size: 11px; }.profile small { color: #8da097; font-size: 9px; }
 .content { min-width: 0; padding: 38px 42px; }
+.customDisplayScale .content { padding-bottom: calc(84px / var(--ui-scale, 1)); }
+.customDisplayScale .detail { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; }
+.customDisplayScale .mailWorkspaceGrid { height: auto; min-height: 0; align-items: start; overflow: visible; }
+.customDisplayScale .mailListPanel { max-height: calc(100dvh / var(--ui-scale, 1) - 180px); min-height: 520px; }
+.customDisplayScale .mailWorkspaceGrid .threadPanel { height: auto; max-height: none; overflow: visible; }
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 30px; margin-bottom: 24px; }
 .eyebrow { margin: 0 0 8px; color: #8a958f; font-size: 10px; font-weight: 700; letter-spacing: 1.6px; }
 h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: -.6px; }
@@ -217,14 +223,28 @@ button.tableRow { cursor: pointer; }.tableRow:not(.tableHeader):hover { backgrou
 .routingSettingsPanel { padding: 20px; border: 1px solid #d6e4dc; border-radius: 14px; background: white; box-shadow: 0 5px 18px rgba(25,43,34,.035); }
 .routingSettingsHead { display: flex; align-items: center; justify-content: space-between; gap: 18px; }.routingSettingsHead > div:first-child { display: flex; align-items: center; gap: 12px; }.routingSettingsHead h2 { margin: 0; }.routingSettingsHead p { margin: 5px 0 0; }
 .routingActions { display: flex; gap: 7px; }.routingActions button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: white; color: #496057; cursor: pointer; font-size: 9px; font-weight: 700; }.routingActions .primary { color: white; background: var(--green); }
-.routingRuleGrid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 17px; }.settingsGrid .routingRuleCard { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; border-radius: 10px; background: #f7faf8; box-shadow: none; }.routingRuleCard > strong { align-self: flex-start; }.routingRuleCard label { display: flex; flex-direction: column; gap: 5px; color: #66756d; font-size: 8px; font-weight: 700; }.routingRuleCard input, .routingRuleCard textarea { width: 100%; border: 1px solid #d7e2db; border-radius: 7px; padding: 8px; background: white; color: #35483e; font-size: 9px; font-weight: 400; }.routingRuleCard textarea { min-height: 112px; resize: vertical; line-height: 1.45; }.routingHelp { padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.55; }
+.routingRuleGrid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 17px; }
+.settingsGrid .routingRuleCard { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 16px; border-radius: 10px; background: #f7faf8; box-shadow: none; }
+.routingRuleCardHead { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.routingRuleCardHead > strong { align-self: flex-start; color: #397156; background: #e7f1ec; padding: 6px 9px; border-radius: 20px; font-size: 9px; }
+.routingRuleCardHead > small { color: #7b8981; font-size: 8px; text-align: right; }
+.routingTableFields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.routingKeywordFields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.routingRuleCard label { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: #66756d; font-size: 8px; font-weight: 700; }
+.routingRuleCard input, .routingRuleCard textarea { width: 100%; border: 1px solid #d7e2db; border-radius: 7px; padding: 9px 10px; background: white; color: #35483e; font-size: 9px; font-weight: 400; }
+.routingRuleCard textarea { min-height: 132px; resize: vertical; line-height: 1.55; white-space: pre-wrap; }
+.keywordEditorFoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.keywordEditorFoot small { color: #87938c; font-size: 8px; font-weight: 500; }
+.keywordEditorFoot button { border: 1px solid #cdded4; border-radius: 7px; padding: 6px 8px; background: white; color: #37664f; cursor: pointer; font-size: 8px; font-weight: 700; }
+.keywordEditorFoot button:hover { background: #eaf3ee; }
+.routingHelp { padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.55; }
 .ruleLines { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }.ruleLines span { background: #f3f7f4; border: 1px solid #e0e8e3; color: #607067; border-radius: 6px; padding: 5px 7px; font-size: 8px; }.ruleLines b { color: #2f5d47; }
 .modalBackdrop { position: fixed; inset: 0; z-index: 50; background: rgba(9,27,20,.55); display: grid; place-items: center; padding: 20px; backdrop-filter: blur(3px); }
 .modal { position: relative; width: min(480px,100%); background: white; border-radius: 16px; padding: 28px; box-shadow: 0 25px 80px rgba(0,0,0,.24); }.modalClose { position: absolute; right: 16px; top: 12px; border: 0; background: none; color: #728078; font-size: 25px; cursor: pointer; }.modal h2 { margin: 0; font: 700 23px Georgia,serif; }.modal > p:not(.eyebrow) { color: #748078; font-size: 10px; line-height: 1.55; }.modal label { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; color: #59665f; font-size: 9px; font-weight: 700; }.modal input, .modal select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--ink); background: white; }.modalAction { width: 100%; margin-top: 20px; }.modal ol { padding-left: 20px; color: #4f5d55; font-size: 10px; line-height: 1.8; }.safetyBox { background: var(--cream); border-radius: 9px; padding: 12px; color: #745a32; font-size: 9px; line-height: 1.6; }
 
 @media (max-width: 1050px) {
   .shell { grid-template-columns: 78px 1fr; }.sidebar { padding-inline: 11px; }.brandWords, .navItem { font-size: 0; }.brand { padding-inline: 8px; }.navItem { justify-content: center; }.navItem span { font-size: 15px; }.syncCard div, .connectButton, .profile div { display: none; }.profile { justify-content: center; }
-  .content { padding: 30px 24px; }.workspace, .pageGrid { grid-template-columns: 1fr; }.mailWorkspaceGrid { height: auto; min-height: 0; overflow: visible; }.mailListPanel, .mailWorkspaceGrid .threadPanel { max-height: 680px; }.detail { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; }.metrics { grid-template-columns: repeat(2,1fr); }.routingRuleGrid { grid-template-columns: 1fr; }.appearanceControls { grid-template-columns: 1fr 1fr; }
+  .content { padding: 30px 24px; }.workspace, .pageGrid { grid-template-columns: 1fr; }.mailWorkspaceGrid { height: auto; min-height: 0; overflow: visible; }.mailListPanel, .mailWorkspaceGrid .threadPanel { max-height: 680px; }.detail { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; }.metrics { grid-template-columns: repeat(2,1fr); }.routingTableFields { grid-template-columns: 1fr 1fr; }.appearanceControls { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 680px) {
   .shell { display: block; }.sidebar { position: sticky; width: 100%; height: auto; padding: 10px 14px; flex-direction: row; align-items: center; }.brand { padding: 0; }.brandMark { width: 34px; height: 34px; }.sidebar nav { flex-direction: row; margin-left: auto; gap: 2px; }.navItem { padding: 8px; }.sideBottom { display: none; }
@@ -234,5 +254,6 @@ button.tableRow { cursor: pointer; }.tableRow:not(.tableHeader):hover { backgrou
   .replyControls, .statusSource { grid-template-columns: 1fr 1fr; }
   .mailTableProgressEditor > label { grid-template-columns: 1fr; }.mailTableChangePreview > div { grid-template-columns: 1fr 1fr 12px 1fr; }
   .routingSettingsHead { align-items: flex-start; flex-direction: column; }.routingActions { width: 100%; }.routingActions button { flex: 1; }
+  .routingRuleCardHead { align-items: flex-start; flex-direction: column; }.routingRuleCardHead > small { text-align: left; }.routingTableFields, .routingKeywordFields { grid-template-columns: 1fr; }
   .appearanceSettingsHead { grid-template-columns: 44px 1fr; }.appearanceSettingsHead > button { grid-column: 2; justify-self: start; }.appearanceControls { grid-template-columns: 1fr; }
 }
