@@ -143,6 +143,15 @@ type ImportedEmail = {
   counterparty_email?: string | null;
   message_count?: number;
   review_status?: "active" | "archive" | "trash";
+  attachments?: MailAttachment[];
+};
+
+type MailAttachment = {
+  id: string;
+  filename: string;
+  attachment_type?: number;
+  is_inline?: boolean;
+  cid?: string;
 };
 
 type ReplyControls = {
@@ -457,14 +466,53 @@ function formatEmailSection(value: string, history: boolean) {
 }
 
 function linkedEmailText(value: string) {
-  return value.split(/(https?:\/\/[^\s]+)/gi).map((part, index) =>
-    /^https?:\/\//i.test(part) ? (
-      <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">
-        {part}
-      </a>
-    ) : (
-      part
-    ),
+  const linkPattern = /((?:https?:\/\/|www\.)[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-z]{2,})/gi;
+  return value.split(linkPattern).map((part, index) => {
+    const trailing = part.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const target = trailing ? part.slice(0, -trailing.length) : part;
+    const href = /^https?:\/\//i.test(target)
+      ? target
+      : /^www\./i.test(target)
+        ? `https://${target}`
+        : /^[\w.+-]+@[\w.-]+\.[a-z]{2,}$/i.test(target)
+          ? `mailto:${target}`
+          : "";
+    if (!href) return part;
+    return (
+      <span key={`${part}-${index}`}>
+        <a href={href} target="_blank" rel="noopener noreferrer">{target}</a>
+        {trailing}
+      </span>
+    );
+  });
+}
+
+function EmailAttachments({ email }: { email: ImportedEmail }) {
+  const attachments = (email.attachments ?? []).filter(
+    (attachment) => attachment.id && !attachment.is_inline,
+  );
+  if (!attachments.length) return null;
+  return (
+    <section className="emailAttachments" aria-label="邮件附件">
+      <div className="emailAttachmentsHead">
+        <strong>附件</strong><span>{attachments.length} 个</span>
+      </div>
+      <div className="emailAttachmentList">
+        {attachments.map((attachment) => {
+          const base = `/api/mail/attachment?messageId=${encodeURIComponent(email.message_id)}&attachmentId=${encodeURIComponent(attachment.id)}&filename=${encodeURIComponent(attachment.filename || "附件")}`;
+          return (
+            <article key={attachment.id}>
+              <span className="attachmentIcon">↧</span>
+              <b title={attachment.filename}>{attachment.filename || "未命名附件"}</b>
+              <div>
+                <a href={base} target="_blank" rel="noopener noreferrer">打开</a>
+                <a href={`${base}&download=1`}>下载</a>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -483,12 +531,14 @@ function ImportedEmailBody({ value }: { value: string }) {
   );
 }
 
-function CompactEmailPreview({ value }: { value: string }) {
+function CompactEmailPreview({ email }: { email: ImportedEmail }) {
+  const value = email.body_text || email.snippet || "这封邮件没有可显示的纯文本正文。";
   const latest = splitEmailBody(value).latest.trim();
   const preview = latest.length > 420 ? `${latest.slice(0, 420).trimEnd()}…` : latest;
   return (
     <>
       <div className="latestMailPreview">{linkedEmailText(preview || "这封邮件没有可显示的纯文本正文。")}</div>
+      <EmailAttachments email={email} />
       <details className="fullMailDetails">
         <summary>展开完整邮件正文</summary>
         <ImportedEmailBody value={value} />
@@ -1866,9 +1916,7 @@ export default function Home() {
                       navigate("dashboard");
                     }}>转到今日工作台处理 →</button>
                   </div>
-                  <CompactEmailPreview
-                    value={selectedImported.body_text || selectedImported.snippet || "这封邮件没有可显示的纯文本正文。"}
-                  />
+                  <CompactEmailPreview email={selectedImported} />
                   {selectedMailEmail && (
                     <MailReplyComposer
                       key={[
@@ -2145,6 +2193,7 @@ function ThreadHistory({ messages, loading }: { messages: ImportedEmail[]; loadi
               </summary>
               <div className="historyFullBody">
                 <ImportedEmailBody value={fullBody} />
+                <EmailAttachments email={message} />
               </div>
             </details>
           );

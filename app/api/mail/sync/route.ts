@@ -90,14 +90,16 @@ export async function POST(request: Request): Promise<Response> {
     const existing = ids.length
       ? await db
           .prepare(
-            `SELECT message_id FROM email_messages WHERE message_id IN (${ids
+            `SELECT message_id, attachments_json FROM email_messages WHERE message_id IN (${ids
               .map(() => "?")
               .join(",")})`,
           )
           .bind(...ids)
-          .all<{ message_id: string }>()
-      : { results: [] as { message_id: string }[] };
-    const known = new Set(existing.results.map((row) => row.message_id));
+          .all<{ message_id: string; attachments_json: string | null }>()
+      : { results: [] as { message_id: string; attachments_json: string | null }[] };
+    const known = new Set(existing.results
+      .filter((row) => row.attachments_json !== null)
+      .map((row) => row.message_id));
     const pageAlreadyKnown =
       !body.full && ids.length > 0 && ids.every((id) => known.has(id));
 
@@ -120,9 +122,9 @@ export async function POST(request: Request): Promise<Response> {
               INSERT INTO email_messages (
                 message_id, thread_id, folder_id, folder_name, subject,
                 sender_name, sender_email, recipients_json, sent_at, snippet,
-                body_text, body_html, labels_json, direction, raw_json,
-                imported_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                body_text, body_html, labels_json, attachments_json, direction,
+                raw_json, imported_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(message_id) DO UPDATE SET
                 thread_id = excluded.thread_id,
                 folder_id = excluded.folder_id,
@@ -136,6 +138,7 @@ export async function POST(request: Request): Promise<Response> {
                 body_text = excluded.body_text,
                 body_html = excluded.body_html,
                 labels_json = excluded.labels_json,
+                attachments_json = excluded.attachments_json,
                 direction = excluded.direction,
                 raw_json = excluded.raw_json,
                 updated_at = excluded.updated_at
@@ -154,6 +157,7 @@ export async function POST(request: Request): Promise<Response> {
               message.bodyText,
               message.bodyHtml,
               JSON.stringify(message.labels),
+              JSON.stringify(message.attachments),
               message.direction,
               message.rawJson,
               now,
@@ -266,6 +270,7 @@ function normalizeMessage(id: string, value: MessageData, folder: Folder) {
   );
   const folderIds = stringArray(raw.folder_ids ?? raw.folders);
   const labels = stringArray(raw.label_ids ?? raw.labels);
+  const attachments = normalizeAttachments(raw.attachments);
   const bodyText =
     decodeBase64Url(stringValue(raw.body_plain_text)) ??
     stringValue(raw.body ?? raw.body_text ?? raw.text_body ?? raw.snippet);
@@ -296,6 +301,7 @@ function normalizeMessage(id: string, value: MessageData, folder: Folder) {
     bodyText,
     bodyHtml,
     labels,
+    attachments,
     direction,
     // The normalized columns are authoritative. Keeping the entire raw mail
     // object duplicates large bodies and wastes CPU on JSON serialization.
@@ -305,6 +311,23 @@ function normalizeMessage(id: string, value: MessageData, folder: Folder) {
       folder_id: folder.id,
     }),
   };
+}
+
+function normalizeAttachments(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const entry = item as Record<string, unknown>;
+    const id = stringValue(entry.id ?? entry.attachment_id);
+    if (!id) return [];
+    return [{
+      id,
+      filename: stringValue(entry.filename ?? entry.name) ?? "未命名附件",
+      attachment_type: typeof entry.attachment_type === "number" ? entry.attachment_type : undefined,
+      is_inline: Boolean(entry.is_inline),
+      cid: stringValue(entry.cid) ?? undefined,
+    }];
+  });
 }
 
 function stringValue(value: unknown): string | null {

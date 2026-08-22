@@ -149,6 +149,25 @@ test("mail items expose a confirmation-gated right-click delete menu", async () 
   assert.match(actionRoute, /json_extract\(recipients_json/);
 });
 
+test("mail bodies expose safe links and downloadable attachments", async () => {
+  const [page, syncRoute, threadRoute, attachmentRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/mail/sync/route.ts", root), "utf8"),
+    readFile(new URL("app/api/mail/thread/route.ts", root), "utf8"),
+    readFile(new URL("app/api/mail/attachment/route.ts", root), "utf8"),
+  ]);
+
+  assert.match(page, /function EmailAttachments/);
+  assert.match(page, /noopener noreferrer/);
+  assert.match(page, /打开/);
+  assert.match(page, /下载/);
+  assert.match(syncRoute, /attachments_json/);
+  assert.match(syncRoute, /normalizeAttachments/);
+  assert.match(threadRoute, /attachments: safeJson/);
+  assert.match(attachmentRoute, /attachments\/download_url/);
+  assert.match(attachmentRoute, /Content-Disposition/);
+});
+
 test("target-table transfer preview allows Felicia to edit collaboration progress", async () => {
   const [page, styles] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),

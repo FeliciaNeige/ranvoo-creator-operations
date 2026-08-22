@@ -44,7 +44,7 @@ export async function GET(request: Request): Promise<Response> {
           ), ranked AS (
             SELECT
               message_id, thread_id, folder_id, folder_name, subject, sender_name, sender_email,
-              recipients_json, sent_at, snippet, body_text, direction,
+              recipients_json, sent_at, snippet, body_text, attachments_json, direction,
               ${counterparty} AS counterparty_email,
               COUNT(*) OVER (PARTITION BY ${counterparty}) AS message_count,
               ROW_NUMBER() OVER (
@@ -64,7 +64,7 @@ export async function GET(request: Request): Promise<Response> {
           WITH ranked AS (
             SELECT
               message_id, thread_id, folder_id, folder_name, subject, sender_name, sender_email,
-              recipients_json, sent_at, snippet, body_text, direction,
+              recipients_json, sent_at, snippet, body_text, attachments_json, direction,
               ${counterparty} AS counterparty_email,
               COUNT(*) OVER (PARTITION BY ${counterparty}) AS message_count,
               ROW_NUMBER() OVER (
@@ -122,6 +122,7 @@ export async function GET(request: Request): Promise<Response> {
           counterparty_email: row.counterparty_email,
           message_count: row.message_count,
           recipients: safeJson(row.recipients_json as string, []),
+          attachments: safeJson(row.attachments_json as string, []),
           body_text:
             typeof row.body_text === "string"
               ? row.body_text.slice(0, 5000)

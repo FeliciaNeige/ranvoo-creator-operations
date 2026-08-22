@@ -156,6 +156,7 @@ async function initializeMailTables(db: D1Database): Promise<void> {
         body_text TEXT,
         body_html TEXT,
         labels_json TEXT NOT NULL DEFAULT '[]',
+        attachments_json TEXT,
         direction TEXT NOT NULL DEFAULT 'unknown',
         review_status TEXT NOT NULL DEFAULT 'active',
         reviewed_at INTEGER,
@@ -191,6 +192,7 @@ async function initializeMailTables(db: D1Database): Promise<void> {
     ["folder_name", "folder_name TEXT"],
     ["review_status", "review_status TEXT NOT NULL DEFAULT 'active'"],
     ["reviewed_at", "reviewed_at INTEGER"],
+    ["attachments_json", "attachments_json TEXT"],
   ]);
   await ensureColumns(db, "mail_sync_state", [
     ["folder_index", "folder_index INTEGER NOT NULL DEFAULT 0"],

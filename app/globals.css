@@ -183,6 +183,11 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .importedBody { min-height: 210px; max-height: 520px; overflow: auto; overflow-wrap: anywhere; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fafbfa; color: #35423b; }
 .emailLatest { max-width: 78ch; white-space: pre-wrap; font-size: 10px; line-height: 1.8; }
 .emailLatest a, .emailHistory a { color: #2d6e50; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.latestMailPreview a, .importedBody a { color: #246c4b; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.emailAttachments { margin: 9px 0 12px; padding: 10px; border: 1px solid #d8e4dd; border-radius: 9px; background: #f7faf8; }
+.emailAttachmentsHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; color: #385f4c; font-size: 8px; }.emailAttachmentsHead span { color: #89958e; }
+.emailAttachmentList { display: grid; gap: 6px; }.emailAttachmentList article { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 7px 8px; border: 1px solid #e1e8e4; border-radius: 7px; background: white; }
+.attachmentIcon { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; background: #e4f0e9; color: #2f6a4e; font-weight: 800; }.emailAttachmentList b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #4a5b52; font-size: 8px; }.emailAttachmentList article div { display: flex; gap: 5px; }.emailAttachmentList a { padding: 5px 7px; border: 1px solid #c9dcd1; border-radius: 6px; color: #2f6a4e; text-decoration: none; font-size: 7px; font-weight: 800; }.emailAttachmentList a:hover { background: #eaf3ee; }
 .quotedEmailHistory { margin-top: 18px; border-top: 1px solid #e1e7e3; padding-top: 13px; }
 .quotedEmailHistory summary { width: fit-content; color: #3f6c56; background: #e8f1ec; border-radius: 7px; padding: 7px 10px; cursor: pointer; font-size: 9px; font-weight: 700; list-style-position: inside; }
 .emailHistory { margin-top: 12px; white-space: pre-wrap; border-left: 3px solid #d6e2db; padding: 12px 14px; background: #f3f6f4; color: #65716b; font-size: 9px; line-height: 1.7; }

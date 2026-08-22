@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 
-const SHELL_CACHE_VERSION = "2026-08-22-context-delete-v6";
+const SHELL_CACHE_VERSION = "2026-08-22-links-attachments-v7";
 
 interface Env {
   ASSETS: Fetcher;

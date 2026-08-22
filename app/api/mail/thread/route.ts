@@ -15,6 +15,7 @@ type ThreadRow = {
   sent_at: number | null;
   snippet: string | null;
   body_text: string | null;
+  attachments_json: string | null;
   direction: "inbound" | "outbound" | "unknown";
   review_status: string;
 };
@@ -31,8 +32,8 @@ export async function GET(request: Request): Promise<Response> {
     await ensureMailTables(db);
     const rows = await db.prepare(`
       SELECT message_id, thread_id, folder_id, folder_name, subject, sender_name,
-             sender_email, recipients_json, sent_at, snippet, body_text, direction,
-             review_status
+             sender_email, recipients_json, sent_at, snippet, body_text,
+             attachments_json, direction, review_status
       FROM email_messages
       WHERE lower(COALESCE(sender_email, '')) = ?
          OR lower(COALESCE(recipients_json, '')) LIKE ?
@@ -46,7 +47,9 @@ export async function GET(request: Request): Promise<Response> {
       items: rows.results.map((row) => ({
         ...row,
         recipients: safeJson(row.recipients_json, []),
+        attachments: safeJson(row.attachments_json ?? "[]", []),
         recipients_json: undefined,
+        attachments_json: undefined,
         body_text: row.body_text ?? null,
       })),
     }, { headers });
