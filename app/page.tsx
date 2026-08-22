@@ -711,6 +711,7 @@ export default function Home() {
     status: "idle",
   });
   const [selectedMailId, setSelectedMailId] = useState("");
+  const [mailboxView, setMailboxView] = useState<"inbox" | "sent">("inbox");
   const [mailLoading, setMailLoading] = useState(false);
   const [mailLoaded, setMailLoaded] = useState(false);
   const [mailTotal, setMailTotal] = useState(0);
@@ -806,7 +807,7 @@ export default function Home() {
     return () => window.clearTimeout(timer);
     // 搜索和页面切换时刷新；加载函数保持使用当前分页状态。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, connected, search]);
+  }, [view, connected, search, mailboxView]);
 
   useEffect(() => {
     if ((view !== "mail" && view !== "dashboard") || !connected || analysisLoaded || reanalyzing) return;
@@ -1266,7 +1267,7 @@ export default function Home() {
     try {
       const offset = append ? importedEmails.length : 0;
       const response = await fetch(
-        `/api/mail/messages?limit=100&offset=${offset}&q=${encodeURIComponent(query)}`,
+        `/api/mail/messages?limit=100&offset=${offset}&q=${encodeURIComponent(query)}&mailbox=${mailboxView}`,
         { cache: "no-store" },
       );
       const body = await readJsonResponse<{
@@ -1691,7 +1692,7 @@ export default function Home() {
               <div className="panel mailListPanel">
                 <div className="panelHead">
                   <div>
-                    <h2>{mailLoaded ? "已迁移邮件" : "相关邮件线程"}</h2>
+                    <h2>{mailboxView === "inbox" ? "收件箱" : "已发送"}</h2>
                     <p>
                       {mailLoading
                         ? "正在读取…"
@@ -1701,6 +1702,36 @@ export default function Home() {
                     </p>
                   </div>
                   <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索邮件" />
+                </div>
+                <div className="mailboxTabs" role="tablist" aria-label="邮件箱分类">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mailboxView === "inbox"}
+                    className={mailboxView === "inbox" ? "active" : ""}
+                    onClick={() => {
+                      setMailboxView("inbox");
+                      setImportedEmails([]);
+                      setSelectedMailId("");
+                    }}
+                  >
+                    <span>收件箱</span>
+                    <small>红人发来的邮件</small>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mailboxView === "sent"}
+                    className={mailboxView === "sent" ? "active" : ""}
+                    onClick={() => {
+                      setMailboxView("sent");
+                      setImportedEmails([]);
+                      setSelectedMailId("");
+                    }}
+                  >
+                    <span>已发送</span>
+                    <small>Felicia 发出的邮件</small>
+                  </button>
                 </div>
                 <div className="mailList">
                   {importedEmails.length > 0
@@ -1720,7 +1751,7 @@ export default function Home() {
                           <span>
                             <strong>{displayName}</strong>
                             <b>{email.subject}</b>
-                            <small>{formatMailDate(email.sent_at)} · 同邮箱 {email.message_count ?? 1} 封</small>
+                            <small>{formatMailDate(email.sent_at)} · 本分类同邮箱 {email.message_count ?? 1} 封</small>
                           </span>
                           <span className="mailTagStack">
                             <em className={`creatorTypeTag type-${creator?.category ?? "未分类"}`}>{creatorTypeLabel(creator?.category, creator?.categoryLabel)}</em>
@@ -1731,7 +1762,9 @@ export default function Home() {
                     : connected && mailLoaded
                       ? (
                         <div className="emptyMail">
-                          尚未迁移到真实邮件，请点击“迁移全部邮件”。
+                          {mailboxView === "inbox"
+                            ? "收件箱暂时没有已迁移的邮件。"
+                            : "已发送中暂时没有已迁移的邮件。"}
                         </div>
                       )
                       : visible.map((creator) => (
@@ -1756,7 +1789,7 @@ export default function Home() {
                 <div className="panel threadPanel" ref={mailThreadPanelRef}>
                   <div className="mailAccountHeader">
                     <span className="avatar">FZ</span>
-                    <div><b>当前邮件账户</b><strong>Felicia · 飞书邮箱</strong><small>{connected ? "已连接，可在本页预览与回复" : "未连接"}</small></div>
+                    <div><b>当前邮件账户 · {mailboxView === "inbox" ? "收件箱" : "已发送"}</b><strong>Felicia · 飞书邮箱</strong><small>{connected ? "已连接，可在本页预览与回复" : "未连接"}</small></div>
                   </div>
                   <div className="threadBadges">
                     <span className={`categoryTag type-${selectedMailCreator?.category ?? "未分类"}`}>

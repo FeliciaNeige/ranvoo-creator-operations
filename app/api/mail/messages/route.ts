@@ -16,6 +16,8 @@ export async function GET(request: Request): Promise<Response> {
     await ensureMailTables(db);
     const url = new URL(request.url);
     const search = (url.searchParams.get("q") ?? "").trim();
+    const mailbox = url.searchParams.get("mailbox") === "sent" ? "sent" : "inbox";
+    const direction = mailbox === "sent" ? "outbound" : "inbound";
     const limit = Math.min(
       100,
       Math.max(1, Number(url.searchParams.get("limit") ?? 50)),
@@ -33,7 +35,7 @@ export async function GET(request: Request): Promise<Response> {
           WITH matched_accounts AS (
             SELECT DISTINCT ${counterparty} AS counterparty_email
             FROM email_messages
-            WHERE review_status = 'active' AND (
+            WHERE review_status = 'active' AND direction = ? AND (
                  subject LIKE ? ESCAPE '\\'
               OR sender_name LIKE ? ESCAPE '\\'
               OR sender_email LIKE ? ESCAPE '\\'
@@ -50,14 +52,14 @@ export async function GET(request: Request): Promise<Response> {
                 ORDER BY COALESCE(sent_at, imported_at) DESC
               ) AS row_number
             FROM email_messages
-            WHERE review_status = 'active' AND ${counterparty} != ''
+            WHERE review_status = 'active' AND direction = ? AND ${counterparty} != ''
           )
           SELECT * FROM ranked
           WHERE row_number = 1
             AND counterparty_email IN (SELECT counterparty_email FROM matched_accounts)
           ORDER BY COALESCE(sent_at, 0) DESC
           LIMIT ? OFFSET ?
-        `).bind(pattern, pattern, pattern, pattern, limit, offset)
+        `).bind(direction, pattern, pattern, pattern, pattern, direction, limit, offset)
       : db.prepare(`
           WITH ranked AS (
             SELECT
@@ -70,29 +72,29 @@ export async function GET(request: Request): Promise<Response> {
                 ORDER BY COALESCE(sent_at, imported_at) DESC
               ) AS row_number
             FROM email_messages
-            WHERE review_status = 'active' AND ${counterparty} != ''
+            WHERE review_status = 'active' AND direction = ? AND ${counterparty} != ''
           )
           SELECT * FROM ranked
           WHERE row_number = 1
           ORDER BY COALESCE(sent_at, 0) DESC
           LIMIT ? OFFSET ?
-        `).bind(limit, offset);
+        `).bind(direction, limit, offset);
     const countQuery = search
       ? db.prepare(`
           SELECT COUNT(DISTINCT ${counterparty}) AS count
           FROM email_messages
-          WHERE review_status = 'active' AND ${counterparty} != '' AND (
+          WHERE review_status = 'active' AND direction = ? AND ${counterparty} != '' AND (
                subject LIKE ? ESCAPE '\\'
             OR sender_name LIKE ? ESCAPE '\\'
             OR sender_email LIKE ? ESCAPE '\\'
             OR body_text LIKE ? ESCAPE '\\'
           )
-        `).bind(pattern, pattern, pattern, pattern)
+        `).bind(direction, pattern, pattern, pattern, pattern)
       : db.prepare(`
           SELECT COUNT(DISTINCT ${counterparty}) AS count
           FROM email_messages
-          WHERE review_status = 'active' AND ${counterparty} != ''
-        `);
+          WHERE review_status = 'active' AND direction = ? AND ${counterparty} != ''
+        `).bind(direction);
     const [messages, state, total] = await Promise.all([
       query.all(),
       db

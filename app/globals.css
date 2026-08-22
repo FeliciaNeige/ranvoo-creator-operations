@@ -129,6 +129,11 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .mailWorkspaceGrid { height: calc(100dvh - 310px); min-height: 620px; align-items: stretch; overflow: hidden; }
 .mailListPanel { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .mailListPanel .panelHead { flex: none; }.mailListPanel .mailList { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }.mailListPanel .loadMore { flex: none; }
+.mailboxTabs { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 9px 12px 11px; border-top: 1px solid var(--line); background: #fafcfb; }
+.mailboxTabs button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 9px 11px; border: 1px solid #d7e3dc; border-radius: 9px; background: white; color: #69776f; cursor: pointer; text-align: left; }
+.mailboxTabs button:hover { border-color: #b9d0c3; background: #f4f8f6; }
+.mailboxTabs button.active { border-color: #477b62; background: #e8f2ec; color: #214d39; box-shadow: inset 0 0 0 1px #477b62; }
+.mailboxTabs span { font-size: 10px; font-weight: 800; }.mailboxTabs small { color: #8a9690; font-size: 7px; font-weight: 500; }
 .mailWorkspaceGrid .threadPanel { min-height: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: auto; }
 .mailSyncBar { display: grid; grid-template-columns: 42px 1fr auto; gap: 13px; align-items: center; margin-bottom: 14px; padding: 15px 17px; background: #edf5f0; border: 1px solid #d7e7dd; border-radius: 13px; }
 .mailSyncIcon { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: #dcece3; color: #2d674b; font-size: 18px; font-weight: 700; }

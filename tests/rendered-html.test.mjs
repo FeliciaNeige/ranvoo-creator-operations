@@ -116,6 +116,23 @@ test("mail thread composer previews an editable collaboration progress update", 
   assert.match(updateRoute, /更新时间/);
 });
 
+test("mail thread separates inbox and sent accounts", async () => {
+  const [page, styles, messagesRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+    readFile(new URL("app/api/mail/messages/route.ts", root), "utf8"),
+  ]);
+
+  assert.match(page, /mailboxView/);
+  assert.match(page, /aria-label="邮件箱分类"/);
+  assert.match(page, /红人发来的邮件/);
+  assert.match(page, /Felicia 发出的邮件/);
+  assert.match(page, /mailbox=\$\{mailboxView\}/);
+  assert.match(styles, /\.mailboxTabs/);
+  assert.match(messagesRoute, /mailbox.*=== "sent"/);
+  assert.match(messagesRoute, /direction = \?/);
+});
+
 test("target-table transfer preview allows Felicia to edit collaboration progress", async () => {
   const [page, styles] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
