@@ -133,6 +133,22 @@ test("mail thread separates inbox and sent accounts", async () => {
   assert.match(messagesRoute, /direction = \?/);
 });
 
+test("mail items expose a confirmation-gated right-click delete menu", async () => {
+  const [page, styles, actionRoute] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+    readFile(new URL("app/api/mail/action/route.ts", root), "utf8"),
+  ]);
+
+  assert.match(page, /onContextMenu/);
+  assert.match(page, /删除邮件线程/);
+  assert.match(page, /仅从工作台移除，保留飞书原件/);
+  assert.match(page, /window\.confirm/);
+  assert.match(styles, /\.mailContextMenu/);
+  assert.match(actionRoute, /counterpartyEmail/);
+  assert.match(actionRoute, /json_extract\(recipients_json/);
+});
+
 test("target-table transfer preview allows Felicia to edit collaboration progress", async () => {
   const [page, styles] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),

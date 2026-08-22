@@ -134,6 +134,10 @@ h1 { margin: 0; font: 700 31px/1.2 Georgia, "Songti SC", serif; letter-spacing: 
 .mailboxTabs button:hover { border-color: #b9d0c3; background: #f4f8f6; }
 .mailboxTabs button.active { border-color: #477b62; background: #e8f2ec; color: #214d39; box-shadow: inset 0 0 0 1px #477b62; }
 .mailboxTabs span { font-size: 10px; font-weight: 800; }.mailboxTabs small { color: #8a9690; font-size: 7px; font-weight: 500; }
+.mailContextMenu { position: fixed; z-index: 80; width: 205px; display: grid; gap: 6px; padding: 10px; border: 1px solid #d8e2dc; border-radius: 10px; background: white; box-shadow: 0 16px 44px rgba(22, 50, 38, .2); }
+.mailContextMenu strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #56665d; font-size: 8px; }
+.mailContextMenu button { width: 100%; border: 1px solid #edcbc7; border-radius: 7px; padding: 8px 9px; background: #fff4f2; color: #a3443c; cursor: pointer; text-align: left; font-size: 9px; font-weight: 800; }
+.mailContextMenu button:hover { background: #fce9e6; }.mailContextMenu small { color: #8a958f; font-size: 7px; line-height: 1.4; }
 .mailWorkspaceGrid .threadPanel { min-height: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: auto; }
 .mailSyncBar { display: grid; grid-template-columns: 42px 1fr auto; gap: 13px; align-items: center; margin-bottom: 14px; padding: 15px 17px; background: #edf5f0; border: 1px solid #d7e7dd; border-radius: 13px; }
 .mailSyncIcon { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: #dcece3; color: #2d674b; font-size: 18px; font-weight: 700; }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import {
   htmlToPlainText,
   plainTextToHtml,
@@ -15,6 +15,13 @@ import {
 type Urgency = "阻塞" | "今日到期" | "需要跟进" | "观察" | "终止候选";
 type Category = "UGC" | "牙医合作" | "商业化红人" | "未分类";
 type View = "dashboard" | "mail" | "creators" | "messages" | "settings";
+
+type MailContextMenu = {
+  x: number;
+  y: number;
+  creatorName: string;
+  creatorEmail: string;
+};
 
 type AppearancePreferences = {
   font: "modern" | "rounded" | "serif";
@@ -721,6 +728,7 @@ export default function Home() {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [threadEmails, setThreadEmails] = useState<ImportedEmail[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [mailContextMenu, setMailContextMenu] = useState<MailContextMenu | null>(null);
   const syncAllMailRef = useRef<(forceFull?: boolean) => Promise<void>>(
     async () => {},
   );
@@ -800,6 +808,21 @@ export default function Home() {
   }, [autoSyncEnabled]);
 
   useEffect(() => {
+    const closeMenu = () => setMailContextMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  useEffect(() => {
     if (view !== "mail" || !connected) return;
     const timer = window.setTimeout(() => {
       void loadImportedMail(search, false);
@@ -867,6 +890,22 @@ export default function Home() {
     setEditing(false);
     setDeliveryMode("now");
     setScheduledAt("");
+  }
+
+  function openMailContextMenu(
+    event: ReactMouseEvent,
+    creatorName: string,
+    creatorEmail: string,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!creatorEmail) return;
+    setMailContextMenu({
+      x: Math.min(event.clientX, window.innerWidth - 220),
+      y: Math.min(event.clientY, window.innerHeight - 118),
+      creatorName,
+      creatorEmail,
+    });
   }
 
   function navigate(nextView: View) {
@@ -1325,21 +1364,29 @@ export default function Home() {
     action: "archive" | "trash",
     creatorName: string,
     creatorEmail: string,
+    wholeThread = false,
   ) {
     const verb = action === "archive" ? "归档" : "移到工作台垃圾箱";
     const confirmed = window.confirm(
-      `${verb}“${creatorName}”的 ${messageIds.length} 封邮件？\n\n这只会将邮件从本网站的待处理列表移出，不会删除飞书邮箱原件。`,
+      `${verb}“${creatorName}”的${wholeThread ? "整个邮件线程" : ` ${messageIds.length} 封邮件`}？\n\n这只会将邮件从本网站的待处理列表移出，不会删除飞书邮箱原件。`,
     );
     if (!confirmed) return;
     try {
       const response = await fetch("/api/mail/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messageIds, action, confirmed: true }),
+        body: JSON.stringify({
+          messageIds,
+          counterpartyEmail: wholeThread ? creatorEmail : undefined,
+          action,
+          confirmed: true,
+        }),
       });
       const body = await readJsonResponse<{ affected?: number; error?: string }>(response, "邮件整理失败。");
       if (!response.ok) throw new Error(body.error || "邮件整理失败。");
-      setImportedEmails((items) => items.filter((item) => !messageIds.includes(item.message_id)));
+      setImportedEmails((items) => items.filter((item) => wholeThread
+        ? counterpartyEmail(item) !== creatorEmail.toLowerCase()
+        : !messageIds.includes(item.message_id)));
       setCreators((items) => items.filter((item) => item.email.toLowerCase() !== creatorEmail.toLowerCase()));
       setThreadEmails([]);
       setSelectedMailId("");
@@ -1624,6 +1671,11 @@ export default function Home() {
                 selected.name,
                 selected.email,
               )}
+              onOpenContextMenu={(event, creator) => openMailContextMenu(
+                event,
+                creator.name,
+                creator.email,
+              )}
               onNotice={setNotice}
             />
           </>
@@ -1746,6 +1798,8 @@ export default function Home() {
                           key={email.message_id}
                           className={selectedImported?.message_id === email.message_id ? "selectedMail" : ""}
                           onClick={() => setSelectedMailId(email.message_id)}
+                          onContextMenu={(event) => openMailContextMenu(event, displayName, emailAddress)}
+                          title="右键可删除邮件线程"
                         >
                           <span className="avatar">{initials(displayName)}</span>
                           <span>
@@ -2003,6 +2057,36 @@ export default function Home() {
         )}
       </section>
 
+      {mailContextMenu && (
+        <div
+          className="mailContextMenu"
+          role="menu"
+          aria-label={`${mailContextMenu.creatorName}邮件操作`}
+          style={{ left: mailContextMenu.x, top: mailContextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <strong>{mailContextMenu.creatorName}</strong>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const target = mailContextMenu;
+              setMailContextMenu(null);
+              void changeMailDisposition(
+                [],
+                "trash",
+                target.creatorName,
+                target.creatorEmail,
+                true,
+              );
+            }}
+          >
+            删除邮件线程
+          </button>
+          <small>仅从工作台移除，保留飞书原件</small>
+        </div>
+      )}
+
       {modal && (
         <div className="modalBackdrop" role="presentation" onMouseDown={() => setModal(null)}>
           <section className="modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
@@ -2131,7 +2215,7 @@ function Workspace({
   history, historyLoading,
   onFilter, onSearch, onChoose, onApprove, onEdit, onDraft,
   onDeliveryMode, onScheduledAt, onExecute, onDisposition, onNotice,
-  onTransferField,
+  onTransferField, onOpenContextMenu,
 }: {
   visible: Creator[]; selected: Creator; filter: string; search: string;
   drafts: Record<number, string>; draftHtmls: Record<number, string>;
@@ -2145,6 +2229,7 @@ function Workspace({
   onScheduledAt: (value: string) => void; onExecute: () => void;
   onTransferField: (field: string, value: string) => void;
   onDisposition: (action: "archive" | "trash") => void;
+  onOpenContextMenu: (event: ReactMouseEvent, creator: Creator) => void;
   onNotice: (value: string) => void;
 }) {
   return (
@@ -2158,7 +2243,13 @@ function Workspace({
         <div className="taskList">
           {visible.length === 0 && <div className="emptyState"><strong>没有匹配的任务</strong><p>清除搜索或切换筛选条件。</p></div>}
           {visible.map((creator) => (
-            <button key={creator.id} className={`taskCard ${selected.id === creator.id ? "current" : ""}`} onClick={() => onChoose(creator.id)}>
+            <button
+              key={creator.id}
+              className={`taskCard ${selected.id === creator.id ? "current" : ""}`}
+              onClick={() => onChoose(creator.id)}
+              onContextMenu={(event) => onOpenContextMenu(event, creator)}
+              title="右键可删除邮件线程"
+            >
               <div className={`priorityPill p-${creator.urgency}`}>{creator.urgency}</div>
               <div className="avatar">{initials(creator.name)}</div>
               <div className="taskMain">
